@@ -4,7 +4,12 @@ Amazon ECSの`RunTask`からFargateコンテナを起動し、Java 21上のSprin
 
 ## Status
 
-設計準備中です。実装範囲、状態モデル、テスト要件は[実装指示書](IMPLEMENTATION_BRIEF.md)を参照してください。
+縦切りMVPを実装中です。実装範囲、状態モデル、テスト要件は[実装指示書](IMPLEMENTATION_BRIEF.md)を参照してください。
+
+```bash
+npm install
+npm run dev
+```
 
 ## Planned stack
 
