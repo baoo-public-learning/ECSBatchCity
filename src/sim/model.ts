@@ -11,7 +11,16 @@ const DEFAULT_CONFIG: SimulationConfig = {
   autoFlush: true,
   taskCpu: 1024,
   taskMemoryMiB: 2048,
+  initialRamPercentage: 20,
   maxRamPercentage: 70,
+}
+
+// BATCHのpending statementはflushまでheapに積まれる。教材上の概算モデル。
+export function heapDemandMiB(config: SimulationConfig): number {
+  const maxPending = config.executorType === 'BATCH'
+    ? Math.min(config.statementCount, config.flushThreshold)
+    : 1
+  return 96 + maxPending * 4
 }
 
 const PHASE_DURATION: Record<Phase, number> = {
@@ -126,12 +135,57 @@ function enter(state: SimulationState, phase: Phase): void {
       break
     case 'DONE':
       state.ecsStatus = 'STOPPED'
-      state.stopCode = state.config.scenario === 'LAUNCH_FAILURE' ? 'TaskFailedToStart' : 'EssentialContainerExited'
-      state.stoppedReason = state.config.scenario === 'LAUNCH_FAILURE' ? 'CannotPullContainerError' : 'Essential container in task exited'
+      if (state.launchFailed) {
+        state.stopCode = 'TaskFailedToStart'
+        state.stoppedReason = 'CannotPullContainerError'
+      } else if (state.desiredStatus === 'STOPPED') {
+        state.stopCode = 'UserInitiated'
+        state.stoppedReason = 'Task stopped by user'
+      } else {
+        state.stopCode = 'EssentialContainerExited'
+        state.stoppedReason = 'Essential container in task exited'
+      }
       event(state, `ECS Task STOPPED · ${state.stopCode}`, state.applicationResult === 'NORMAL' ? 'success' : 'warning')
       break
     case 'IDLE':
       break
+  }
+}
+
+function buildJavaModel(config: SimulationConfig): SimulationState['java'] {
+  const maxHeapMiB = Math.floor(config.taskMemoryMiB * config.maxRamPercentage / 100)
+  const initialHeapMiB = Math.floor(config.taskMemoryMiB * config.initialRamPercentage / 100)
+  const assignedVcpus = config.taskCpu / 1024
+  const activeProcessorCount = Math.max(1, Math.ceil(assignedVcpus))
+  const nonHeap = config.taskMemoryMiB - maxHeapMiB
+  const metaspaceMiB = Math.floor(nonHeap * 0.16)
+  const threadStacksMiB = Math.floor(nonHeap * 0.16)
+  const codeCacheMiB = Math.floor(nonHeap * 0.39)
+  const directBuffersMiB = Math.floor(nonHeap * 0.16)
+  return {
+    version: 21,
+    taskCpu: config.taskCpu,
+    taskMemoryMiB: config.taskMemoryMiB,
+    initialRamPercentage: config.initialRamPercentage,
+    maxRamPercentage: config.maxRamPercentage,
+    initialHeapMiB,
+    maxHeapMiB,
+    assignedVcpus,
+    activeProcessorCount,
+    gcName: activeProcessorCount >= 2 && config.taskMemoryMiB >= 2048 ? 'G1' : 'Serial',
+    javaToolOptions: [
+      `-XX:InitialRAMPercentage=${config.initialRamPercentage}`,
+      `-XX:MaxRAMPercentage=${config.maxRamPercentage}`,
+      '-XX:+ExitOnOutOfMemoryError',
+      `-XX:ActiveProcessorCount=${activeProcessorCount}`,
+    ].join(' '),
+    nativeBudget: {
+      metaspaceMiB,
+      threadStacksMiB,
+      codeCacheMiB,
+      directBuffersMiB,
+      otherMiB: nonHeap - metaspaceMiB - threadStacksMiB - codeCacheMiB - directBuffersMiB,
+    },
   }
 }
 
@@ -140,6 +194,8 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
   resolved.statementCount = Math.max(1, Math.floor(resolved.statementCount))
   resolved.flushThreshold = Math.max(1, Math.floor(resolved.flushThreshold))
   resolved.failAtStatement = Math.min(resolved.statementCount, Math.max(1, Math.floor(resolved.failAtStatement)))
+  resolved.maxRamPercentage = Math.min(90, Math.max(10, Math.floor(resolved.maxRamPercentage)))
+  resolved.initialRamPercentage = Math.min(resolved.maxRamPercentage, Math.max(5, Math.floor(resolved.initialRamPercentage)))
   return {
     now: 0,
     runId: 0,
@@ -171,13 +227,8 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
     stopCode: null,
     stoppedReason: null,
     containerReason: null,
-    java: {
-      version: 21,
-      taskCpu: resolved.taskCpu,
-      taskMemoryMiB: resolved.taskMemoryMiB,
-      maxRamPercentage: resolved.maxRamPercentage,
-      maxHeapMiB: Math.floor(resolved.taskMemoryMiB * resolved.maxRamPercentage / 100),
-    },
+    launchFailed: false,
+    java: buildJavaModel(resolved),
     config: resolved,
     events: [],
     nextEventId: 1,
@@ -222,6 +273,7 @@ function advancePhase(state: SimulationState): void {
         state.applicationResult = 'PLATFORM_FAILURE'
         state.springStatus = 'NOT_STARTED'
         state.applicationExitCode = null
+        state.launchFailed = true
         enter(state, 'RELEASE_ENI')
       } else {
         enter(state, 'START_JVM')
@@ -267,6 +319,20 @@ function advancePhase(state: SimulationState): void {
         }
         event(state, 'jobRepositoryにはSTARTEDが残る · 次回起動前にrecoverまたは手動修復が必要', 'warning')
         event(state, 'DBが接続断を検出し未commit変更をrollback')
+        enter(state, 'STOP_CONTAINER')
+        break
+      }
+      const demand = heapDemandMiB(state.config)
+      if (demand > state.java.maxHeapMiB) {
+        state.applicationResult = 'PLATFORM_FAILURE'
+        state.springStatus = 'FAILED'
+        state.pendingStatements = 0
+        state.transaction = state.transaction === 'ACTIVE' ? 'ROLLED_BACK' : state.transaction
+        state.containerExitCode = 3
+        event(state, `pending batchのheap需要が上限を超過 · 必要≈${demand}MiB > 最大heap ${state.java.maxHeapMiB}MiB`, 'error')
+        event(state, 'ExitOnOutOfMemoryError · shutdown hookなしでJVM即終了 exit 3', 'error')
+        event(state, 'flushThresholdを下げるかtask memory / MaxRAMPercentageを上げると回避できる', 'warning')
+        event(state, 'jobRepositoryにはSTARTEDが残る · 次回起動前にrecoverまたは手動修復が必要', 'warning')
         enter(state, 'STOP_CONTAINER')
         break
       }
@@ -472,6 +538,13 @@ export function stopTask(source: SimulationState): SimulationState {
   state.desiredStatus = 'STOPPED'
   if (state.phase === 'FORCE_KILL' || state.phase === 'CLOSE_SPRING' || state.phase === 'STOP_CONTAINER' || state.phase === 'RELEASE_ENI' || state.phase === 'DONE') {
     event(state, 'StopTask · 既に停止処理中のため終了結果は変更されない')
+    return state
+  }
+  if (state.ecsStatus === 'PROVISIONING' || state.ecsStatus === 'PENDING' || state.ecsStatus === 'ACTIVATING') {
+    // container未起動なのでSIGTERMの宛先が存在しない。起動を中止するだけ。
+    state.applicationResult = 'PLATFORM_FAILURE'
+    event(state, 'StopTask · container起動前のため起動を中止', 'warning')
+    enter(state, 'RELEASE_ENI')
     return state
   }
   if (state.config.hangOnSigterm) {

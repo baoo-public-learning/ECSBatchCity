@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CityCanvas from './components/CityCanvas.vue'
 import { scenarioLabel } from './sim/model'
 import type { ExecutorType, FailoverPolicy, Scenario, TimelineEvent } from './sim/types'
@@ -14,6 +14,22 @@ const failAtStatement = ref(6)
 const autoFlush = ref(true)
 const hangOnSigterm = ref(false)
 const failoverPolicy = ref<FailoverPolicy>('FAIL_JOB')
+const taskCpu = ref(1024)
+const taskMemoryMiB = ref(2048)
+// Fargateで有効なtask CPU × memoryの組み合わせだけを選べるようにする。
+const memoryOptionsByCpu: Record<number, number[]> = {
+  256: [512, 1024, 2048],
+  512: [1024, 2048, 4096],
+  1024: [2048, 4096, 8192],
+  2048: [4096, 8192],
+  4096: [8192],
+}
+const memoryOptions = computed(() => memoryOptionsByCpu[taskCpu.value] ?? [2048])
+watch(taskCpu, () => {
+  if (!memoryOptions.value.includes(taskMemoryMiB.value)) taskMemoryMiB.value = memoryOptions.value[0]
+})
+const initialRamPercentage = ref(20)
+const maxRamPercentage = ref(70)
 let timer = 0
 
 const state = computed(() => store.snapshot)
@@ -37,6 +53,10 @@ function start(): void {
     autoFlush: autoFlush.value,
     hangOnSigterm: hangOnSigterm.value,
     failoverPolicy: failoverPolicy.value,
+    taskCpu: taskCpu.value,
+    taskMemoryMiB: taskMemoryMiB.value,
+    initialRamPercentage: initialRamPercentage.value,
+    maxRamPercentage: maxRamPercentage.value,
   })
 }
 
@@ -171,6 +191,32 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <input v-model="hangOnSigterm" :disabled="store.isActive" type="checkbox" class="size-4 shrink-0 accent-red-400 disabled:opacity-50" />
           </label>
 
+          <div class="rounded-lg border border-slate-700 bg-slate-950/45 p-3">
+            <p class="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-sky-300/70">Java 21 container設定</p>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block text-xs text-slate-300">
+                Task CPU
+                <select v-model.number="taskCpu" :disabled="store.isActive" class="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/80 px-2 py-1.5 text-white disabled:opacity-50">
+                  <option v-for="cpu in [256, 512, 1024, 2048, 4096]" :key="cpu" :value="cpu">{{ cpu }} ({{ cpu / 1024 }} vCPU)</option>
+                </select>
+              </label>
+              <label class="block text-xs text-slate-300">
+                Task memory
+                <select v-model.number="taskMemoryMiB" :disabled="store.isActive" class="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/80 px-2 py-1.5 text-white disabled:opacity-50">
+                  <option v-for="mem in memoryOptions" :key="mem" :value="mem">{{ mem }} MiB</option>
+                </select>
+              </label>
+            </div>
+            <label class="mt-2 block text-xs text-slate-300">
+              InitialRAMPercentage <span class="mono float-right text-sky-300">{{ initialRamPercentage }}%</span>
+              <input v-model.number="initialRamPercentage" :disabled="store.isActive" type="range" min="5" :max="maxRamPercentage" class="mt-1 w-full accent-sky-400 disabled:opacity-50" />
+            </label>
+            <label class="mt-2 block text-xs text-slate-300">
+              MaxRAMPercentage <span class="mono float-right text-sky-300">{{ maxRamPercentage }}%</span>
+              <input v-model.number="maxRamPercentage" :disabled="store.isActive" type="range" min="10" max="90" class="mt-1 w-full accent-sky-400 disabled:opacity-50" />
+            </label>
+          </div>
+
           <div class="grid grid-cols-2 gap-2 pt-2">
             <button :disabled="store.isActive" class="rounded-lg bg-sky-400 px-4 py-3 font-bold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-40" @click="start">RunTask</button>
             <button :disabled="!store.isActive" class="rounded-lg border border-red-400/40 bg-red-400/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-400/20 disabled:cursor-not-allowed disabled:opacity-30" @click="store.stop">StopTask</button>
@@ -244,13 +290,24 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <span class="mono text-sky-300">{{ state.java.maxHeapMiB }} MiB heap</span>
           </div>
           <dl class="mt-3 grid grid-cols-2 gap-y-2 text-xs">
-            <dt class="text-slate-500">Task CPU</dt><dd class="mono text-right">{{ state.java.taskCpu }}</dd>
+            <dt class="text-slate-500">Task CPU</dt><dd class="mono text-right">{{ state.java.taskCpu }} ({{ state.java.assignedVcpus }} vCPU)</dd>
+            <dt class="text-slate-500">JVM認識CPU</dt><dd class="mono text-right">{{ state.java.activeProcessorCount }}(固定)</dd>
             <dt class="text-slate-500">Task memory</dt><dd class="mono text-right">{{ state.java.taskMemoryMiB }} MiB</dd>
-            <dt class="text-slate-500">MaxRAMPercentage</dt><dd class="mono text-right">{{ state.java.maxRamPercentage }}%</dd>
+            <dt class="text-slate-500">Initial heap</dt><dd class="mono text-right">{{ state.java.initialHeapMiB }} MiB ({{ state.java.initialRamPercentage }}%)</dd>
+            <dt class="text-slate-500">Max heap</dt><dd class="mono text-right">{{ state.java.maxHeapMiB }} MiB ({{ state.java.maxRamPercentage }}%)</dd>
+            <dt class="text-slate-500">GC</dt><dd class="mono text-right">{{ state.java.gcName }}</dd>
             <dt class="text-slate-500">JDBC stack</dt><dd class="text-right">AWS Wrapper → pgJDBC</dd>
             <dt class="text-slate-500">Writer host</dt><dd class="mono text-right">{{ state.writerHost }}</dd>
             <dt class="text-slate-500">Failover</dt><dd class="mono text-right" :class="state.failoverState === 'NONE' ? '' : 'text-amber-300'">{{ state.failoverState }}</dd>
           </dl>
+          <div class="mt-3 border-t border-slate-700/60 pt-2 text-[10px] leading-4">
+            <p class="text-slate-400">heap以外のnative領域(説明用予算、上限ではない):</p>
+            <p class="mono text-slate-500">
+              Metaspace {{ state.java.nativeBudget.metaspaceMiB }} · thread stack {{ state.java.nativeBudget.threadStacksMiB }} · code cache {{ state.java.nativeBudget.codeCacheMiB }} · direct buffer {{ state.java.nativeBudget.directBuffersMiB }} · その他 {{ state.java.nativeBudget.otherMiB }} MiB
+            </p>
+            <p class="mono mt-1 break-words text-slate-500">JAVA_TOOL_OPTIONS: {{ state.java.javaToolOptions }}</p>
+            <p class="mt-1 text-slate-500">Max heapは予約上限であり、起動時の使用量ではありません。GCはCPU2以上かつメモリ2GiB以上でG1、それ以外はSerialが選ばれます。</p>
+          </div>
           <p v-if="state.failoverState === 'RECONNECTED'" class="mt-2 text-[10px] leading-4 text-slate-500">
             RECONNECTEDは接続状態です。中断されたtransactionの再実行を意味しません。
           </p>

@@ -82,6 +82,7 @@ export interface SimulationConfig {
   autoFlush: boolean
   taskCpu: number
   taskMemoryMiB: number
+  initialRamPercentage: number
   maxRamPercentage: number
 }
 
@@ -116,12 +117,29 @@ export interface SimulationState {
   stopCode: string | null
   stoppedReason: string | null
   containerReason: string | null
+  launchFailed: boolean
   java: {
     version: 21
     taskCpu: number
     taskMemoryMiB: number
+    initialRamPercentage: number
     maxRamPercentage: number
+    initialHeapMiB: number
     maxHeapMiB: number
+    // Fargateはcpu-shares制御でJVM認識CPUが環境依存になるため、
+    // 教材では-XX:ActiveProcessorCountで決定論的に固定する。
+    assignedVcpus: number
+    activeProcessorCount: number
+    gcName: 'G1' | 'Serial'
+    javaToolOptions: string
+    // 説明用の予算であり上限ではない。
+    nativeBudget: {
+      metaspaceMiB: number
+      threadStacksMiB: number
+      codeCacheMiB: number
+      directBuffersMiB: number
+      otherMiB: number
+    }
   }
   config: SimulationConfig
   events: TimelineEvent[]

@@ -112,7 +112,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - 同日、Aurora障害2シナリオも公開ページで確認: WRITER_FAILOVER(接続喪失→検出→topology更新→writer-2再接続→08007→TX LOST→101、中断flushのBatchResultなし、RECONNECTED注記表示)、DB_CONNECT_FAILURE(TX NONEのまま、Tasklet未実行、CannotGetJdbcConnection→CannotCreateTransaction→101)。console errorなし。
 - 同日、RETRY_TASKLET(attempt 1喪失→attempt 2で全件再実行→COMMIT→exit 0、attemptバッジと「確定件数に含まれない」表示)、JVM_OOM(Spring exit —のままContainer exit 3、STARTED残留)、ECS_OOM_KILL(137、container reasonとtask stoppedReasonの区別表示)も公開ページで確認。
 - hang SIGTERM経路はSIGTERM→hang→stopTimeout待機のtimelineまで公開ページで確認(完走はタブのthrottlingにより未確認、ユニットテストで検証済み)。このQAでFORCE_KILL中の再StopTaskによるイベント重複バグを発見し修正済み。
-- 既知の軽微な違和感: RUNNING前(PROVISIONING等)のStopTask+hangでもSIGTERM/hangのイベントが出る。実ECSではcontainer未起動のためSIGTERM対象がない。将来phase別のStopTask表現を整えるときに直す。
+- (解消済み 2026-08-01)RUNNING前のStopTask+hangのSIGTERM違和感は、起動前StopTaskを「SIGTERMなしの起動中止」として修正した。
 - 未実施: mobile幅QA(Chromeウィンドウのresizeが常に無効、DevTools device emulationも拡張にブロックされたため。実機または別環境で確認すること)。
 - 補足: バックグラウンドタブではChromeのtimer throttlingとdelta cap(0.25s)によりシミュレーション進行が実時間より遅くなる。バグではない。
 
@@ -204,15 +204,18 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 ### P1: Java 21設定
 
-- task CPUの操作
-- task memoryの操作
-- `InitialRAMPercentage`
-- `MaxRAMPercentage`
-- JVMが認識したCPU数
-- heap / metaspace / native memoryの区別
-- GC名とGC activity
-- `JAVA_TOOL_OPTIONS`表示
-- memory設定によるOOMシナリオ
+済み(2026-08-01):
+
+- task CPU(256〜4096)/ task memory(512〜8192)/ `InitialRAMPercentage` / `MaxRAMPercentage` をUIで操作可能にした。
+- 割当vCPUとJVM認識CPUを分離。Fargateはcpu-shares制御でJVM認識CPUが環境依存になるため(JDK19+はshares無視、Codex調査)、教材では`-XX:ActiveProcessorCount=ceil(vCPU)`で決定論的に固定し、その旨を表示。
+- GC自動選択: 認識CPU2以上かつメモリ2GiB以上でG1、それ以外Serial(JDK21のgcConfig実装準拠)。デフォルト1 vCPUだとSerialになるのが教材ポイント。
+- initial/max heap、native領域の説明用予算(Metaspace/thread stack/code cache/direct buffer/その他)、`JAVA_TOOL_OPTIONS`文字列を表示。「Max heapは予約上限でありRSSではない」注記。
+- メモリ設定起因OOM: BATCHのpending batchのheap需要(96 + maxPending×4 MiB の概算モデル)が最大heapを超えるとExitOnOutOfMemoryError(exit 3)。**flushThresholdを下げると回避できる**というメモリ×batch設計の連動を表現。
+- あわせてECS stop metadataを正確化: StopTaskは`UserInitiated`/`Task stopped by user`、RUNNING前のStopTaskはSIGTERMなしの起動中止(exitCodeなし)へ修正。
+
+残り:
+
+- GC activity(GC回数・pause時間などの動的表示)
 
 ### P2: 3D表現
 
@@ -237,10 +240,16 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 ### P2: 配信と保守
 
-- production bundleが約613 kBで、500 kB warningが出ている。Three.jsのlazy loadまたはmanual chunk分割を検討する。
+済み(2026-08-01):
+
+- manualChunksでthree(522kB)/vue+pinia(70kB)/app(39kB)に分割し、500kB warningはthree本体のみとなったため`chunkSizeWarningLimit: 560`で明示済み扱いにした。さらに縮めるならThree.jsのlazy load。
+- Open Graph metadata(og:title/description/type/url、twitter:card)を`index.html`へ追加。
+
+残り:
+
 - GitHub ActionsからNode.js 20 action runtimeのdeprecation warningが出る。利用中actionの対応版が公開されたら更新する。
 - repository licenseが未決定。所有者が方針を決めて`LICENSE`を追加する。
-- Open Graph metadataとsocial previewは未設定。
+- social preview画像(og:image)は未設定。
 
 ## 現在の主要ファイル
 
@@ -253,6 +262,8 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `test/aurora-failure.test.ts`: DB_CONNECT_FAILURE、writer failover、transaction LOST、再接続≠再実行のtest
 - `test/process-death.test.ts`: JVM_OOM(exit 3)、ECS_OOM_KILL(137/containerReason)、stopTimeout SIGKILL、STARTED残留のtest
 - `test/failover-retry.test.ts`: RETRY_TASKLET、attempt管理、旧attempt除外のtest
+- `test/stop-metadata.test.ts`: UserInitiated、起動前StopTaskの起動中止のtest
+- `test/java-container.test.ts`: heap/CPU/GC導出、JAVA_TOOL_OPTIONS、native予算、メモリ設定起因OOMのtest
 - `test/store.test.ts`: Pinia store経由のreactive proxy回帰test(structuredClone対策)
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector
