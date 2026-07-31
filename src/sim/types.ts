@@ -33,6 +33,16 @@ export type Phase =
   | 'RELEASE_ENI'
   | 'DONE'
 
+export interface BatchResult {
+  flushIndex: number
+  mappedStatementId: string
+  sql: string
+  parameterCount: number
+  updateCounts: number[]
+  successfulStatementCount: number
+  failedStatementIndex: number | null
+}
+
 export interface TimelineEvent {
   id: number
   at: number
@@ -69,6 +79,7 @@ export interface SimulationState {
   mapperCalls: number
   pendingStatements: number
   flushedStatements: number
+  batchResults: BatchResult[]
   flushRequested: boolean
   sqlExecutions: number
   updateCount: number | null

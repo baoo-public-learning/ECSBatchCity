@@ -65,11 +65,19 @@ function enter(state: SimulationState, phase: Phase): void {
     case 'RUN_TASKLET':
       state.batchStatus = 'STARTED'
       state.transaction = 'ACTIVE'
-      event(state, `Tasklet開始 · ExecutorType.${state.executorType}`)
+      if (state.mapperCalls === 0) {
+        event(state, `Tasklet開始 · ExecutorType.${state.executorType}`)
+      } else {
+        event(state, `Tasklet再開 · 残りMapper呼び出し ${state.config.statementCount - state.mapperCalls}件`)
+      }
       break
     case 'FLUSH_BATCH':
       state.flushRequested = state.config.autoFlush
-      event(state, `MyBatis batch待機 · pending ${state.pendingStatements}件`)
+      if (state.mapperCalls >= state.config.statementCount && state.pendingStatements < state.config.flushThreshold) {
+        event(state, `全Mapper呼び出し完了 · commit前にpending ${state.pendingStatements}件をflush`)
+      } else {
+        event(state, `flush threshold ${state.config.flushThreshold}件到達 · pending ${state.pendingStatements}件`)
+      }
       if (state.flushRequested) event(state, '自動 flushStatements() を要求')
       break
     case 'COMMIT':
@@ -108,6 +116,8 @@ function enter(state: SimulationState, phase: Phase): void {
 
 export function createInitialState(config: Partial<SimulationConfig> = {}): SimulationState {
   const resolved = { ...DEFAULT_CONFIG, ...config }
+  resolved.statementCount = Math.max(1, Math.floor(resolved.statementCount))
+  resolved.flushThreshold = Math.max(1, Math.floor(resolved.flushThreshold))
   return {
     now: 0,
     runId: 0,
@@ -126,6 +136,7 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
     mapperCalls: 0,
     pendingStatements: 0,
     flushedStatements: 0,
+    batchResults: [],
     flushRequested: false,
     sqlExecutions: 0,
     updateCount: null,
@@ -163,7 +174,9 @@ function completeWork(state: SimulationState): void {
     return
   }
 
-  state.updateCount = state.config.scenario === 'WARNING' ? 0 : state.config.statementCount
+  state.updateCount = state.executorType === 'BATCH'
+    ? state.batchResults.reduce((sum, result) => sum + result.updateCounts.reduce((a, b) => a + b, 0), 0)
+    : state.config.scenario === 'WARNING' ? 0 : state.config.statementCount
   enter(state, 'COMMIT')
 }
 
@@ -194,22 +207,41 @@ function advancePhase(state: SimulationState): void {
     case 'START_JOB':
       enter(state, 'RUN_TASKLET')
       break
-    case 'RUN_TASKLET':
-      state.mapperCalls = state.config.statementCount
+    case 'RUN_TASKLET': {
       if (state.executorType === 'SIMPLE') {
+        state.mapperCalls = state.config.statementCount
         state.sqlExecutions = state.config.statementCount
         completeWork(state)
-      } else {
-        state.pendingStatements = state.config.statementCount
-        enter(state, 'FLUSH_BATCH')
+        break
       }
+      const remaining = state.config.statementCount - state.mapperCalls
+      const chunk = Math.min(state.config.flushThreshold, remaining)
+      state.mapperCalls += chunk
+      state.pendingStatements += chunk
+      enter(state, 'FLUSH_BATCH')
       break
+    }
     case 'FLUSH_BATCH': {
       const pending = state.pendingStatements
+      const perStatementUpdateCount = state.config.scenario === 'WARNING' ? 0 : 1
+      state.batchResults.push({
+        flushIndex: state.batchResults.length + 1,
+        mappedStatementId: 'RecordMapper.upsertRecord',
+        sql: 'UPDATE records SET payload = ? WHERE id = ?',
+        parameterCount: pending,
+        updateCounts: Array.from({ length: pending }, () => perStatementUpdateCount),
+        successfulStatementCount: pending,
+        failedStatementIndex: null,
+      })
       state.pendingStatements = 0
       state.flushedStatements += pending
       state.sqlExecutions += 1
-      completeWork(state)
+      event(state, `executeBatch() 完了 · BatchResult #${state.batchResults.length} update counts ${pending}件`)
+      if (state.mapperCalls < state.config.statementCount) {
+        enter(state, 'RUN_TASKLET')
+      } else {
+        completeWork(state)
+      }
       break
     }
     case 'COMMIT':
@@ -258,6 +290,7 @@ export function tick(source: SimulationState, deltaSeconds: number): SimulationS
   const state = structuredClone(source)
   let remaining = deltaSeconds
   while (remaining > 0 && state.phase !== 'DONE') {
+    if (state.phase === 'FLUSH_BATCH' && !state.flushRequested) break
     const duration = PHASE_DURATION[state.phase]
     const available = duration - state.phaseElapsed
     const consumed = Math.min(remaining, available)

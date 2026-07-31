@@ -43,6 +43,10 @@ function eventDot(event: TimelineEvent): string {
   }[event.kind]
 }
 
+function updateCountTotal(updateCounts: number[]): number {
+  return updateCounts.reduce((total, count) => total + count, 0)
+}
+
 onMounted(() => {
   let previous = performance.now()
   timer = window.setInterval(() => {
@@ -116,9 +120,12 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <input v-model.number="flushThreshold" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-sky-400 disabled:opacity-50" />
           </label>
 
-          <label v-if="executorType === 'BATCH'" class="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-300">
-            commit前に自動flush
-            <input v-model="autoFlush" :disabled="store.isActive" type="checkbox" class="size-4 accent-sky-400 disabled:opacity-50" />
+          <label v-if="executorType === 'BATCH'" class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-300">
+            <span>
+              flushStatements()を自動実行
+              <span class="block text-[10px] text-slate-500">OFF: threshold到達ごとに手動flushを待つ</span>
+            </span>
+            <input v-model="autoFlush" :disabled="store.isActive" type="checkbox" class="size-4 shrink-0 accent-sky-400 disabled:opacity-50" />
           </label>
 
           <button v-if="state.phase === 'FLUSH_BATCH' && !state.flushRequested" class="w-full rounded-lg border border-amber-400/50 bg-amber-400/10 px-4 py-3 font-bold text-amber-200 transition hover:bg-amber-400/20" @click="store.flush">
@@ -196,6 +203,36 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <dt class="text-slate-500">MaxRAMPercentage</dt><dd class="mono text-right">{{ state.java.maxRamPercentage }}%</dd>
             <dt class="text-slate-500">JDBC stack</dt><dd class="text-right">AWS Wrapper → pgJDBC</dd>
           </dl>
+        </div>
+
+        <div v-if="state.executorType === 'BATCH'" class="mt-5 rounded-xl border border-slate-700/60 bg-slate-950/50 p-3">
+          <h3 class="text-sm font-semibold text-slate-200">BatchResult</h3>
+
+          <p v-if="!state.batchResults.length" class="mt-3 text-xs leading-5 text-slate-500">
+            flushStatements()の結果がここに表示されます
+          </p>
+
+          <ol v-else class="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+            <li v-for="result in state.batchResults" :key="result.flushIndex" class="min-w-0 rounded-lg border border-slate-700/60 bg-slate-950/50 p-3 text-xs">
+              <div class="flex items-center justify-between gap-3">
+                <span class="font-semibold text-sky-300">flush #{{ result.flushIndex }}</span>
+                <span class="mono shrink-0 text-slate-400">parameters: {{ result.parameterCount }}</span>
+              </div>
+              <p class="mono mt-2 break-all text-slate-300">{{ result.mappedStatementId }}</p>
+              <p class="mono mt-1 break-words text-[10px] leading-4 text-slate-500">{{ result.sql }}</p>
+              <div class="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-slate-400">
+                <span>update counts: {{ result.updateCounts.length }}件</span>
+                <span class="mono">合計 {{ updateCountTotal(result.updateCounts) }}</span>
+              </div>
+              <p v-if="result.updateCounts.length <= 10" class="mono mt-1 break-words text-[10px] text-slate-500">
+                [{{ result.updateCounts.join(', ') }}]
+              </p>
+            </li>
+          </ol>
+
+          <p class="mt-3 border-t border-slate-700/60 pt-3 text-[10px] leading-4 text-slate-500">
+            update countsはflush結果であり、commit前は未確定です。rollbackで取り消せます。
+          </p>
         </div>
 
         <div class="mt-5">

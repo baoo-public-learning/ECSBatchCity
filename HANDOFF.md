@@ -64,6 +64,9 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - pending batch
 - 手動`flushStatements()`
 - 自動flush
+- `flushThreshold`によるchunk処理と複数回flush
+- flushごとの`BatchResult`蓄積(mapped statement ID、SQL、parameter count、update counts)
+- BATCHのupdate count合計をflush結果から算出
 - commit / rollback
 - AWS Advanced JDBC WrapperからAurora writerまでの表示
 - 正常終了`0`
@@ -86,13 +89,14 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - ECS、Spring、Batch、transaction状態
 - pending / flushed statement数
 - framework、application、container終了情報
+- BatchResult一覧パネル(flush回数、parameter count、update counts合計、10件以下は配列表示)
 - Java 21、task CPU、task memory、最大heap表示
 - 6レイヤーのThree.jsシーン
 - active layerと処理フローのアニメーション
 
 ## 現在の検証結果
 
-- `npm test`: 10 tests passed
+- `npm test`: 19 tests passed
 - `npm run typecheck`: passed
 - `npm run build`: passed
 - production dependency audit: 0 known vulnerabilities
@@ -142,13 +146,19 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 ### P1: MyBatisモデルの完成度
 
-- `flushThreshold`を実際のsimulation behaviorへ接続する。現在はUIとconfigに存在するが、statementCount途中での複数flushには未対応。
-- 複数回flushを実装する。
-- `BatchResult`一覧を表示する。
-- mapped statement ID、parameter count、update countsを表示する。
-- `BatchUpdateException`の失敗位置とpartial update countsを実装する。
-- partial update countsをpartial commitと表示しないテストを追加する。
-- commit時に未flush batchがflushされる専用シナリオを追加する。
+済み(2026-07-31):
+
+- `flushThreshold`をsimulationへ接続した。`RUN_TASKLET → FLUSH_BATCH → RUN_TASKLET`の循環でthresholdごとにchunk処理する。
+- 複数回flushと`BatchResult`蓄積を実装した。
+- BatchResult一覧(mapped statement ID、SQL、parameter count、update counts)をInspectorへ表示した。
+- 最終端数chunkはcommit前flushとしてtimelineに区別して表示する。
+- autoFlush=OFF時はthreshold到達ごとに停止し手動flushを待つ(大きなtickでもゲートを突き抜けない)。
+- rollback後もBatchResultは診断情報として保持し、updateCountはnullのまま(partial commitと表示しない)。
+
+残り:
+
+- `BatchUpdateException`の失敗位置とpartial update countsを実装する。既存ABNORMAL(flush成功後のTasklet例外)とは別シナリオとして追加すること(Codex相談で合意した設計方針)。
+- `EXECUTE_FAILED` / `SUCCESS_NO_INFO`のupdate counts形式の扱い。
 
 ### P1: 終了と障害
 
@@ -210,6 +220,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `src/sim/types.ts`: simulation contract
 - `src/sim/model.ts`: deterministic state machine
 - `test/model.test.ts`: lifecycle、exit code、MyBatis executor test
+- `test/mybatis-flush.test.ts`: flushThreshold、複数flush、BatchResult、手動flushゲートのtest
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector
 - `src/components/CityCanvas.vue`: VueとThree.js rendererのlifecycle接続
@@ -219,7 +230,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 ## 次の推奨タスク
 
-最初のタスクは「公開ページのdesktop/mobile目視QAと、見つかった不具合の修正」にする。その後、`flushThreshold`をsimulationへ接続し、複数flushと`BatchResult`をTDDで実装する。
+最初のタスクは「公開ページのdesktop/mobile目視QAと、見つかった不具合の修正」にする(BatchResultパネルの表示確認を含む)。その後、`BatchUpdateException`シナリオ(失敗位置、partial update counts、既存ABNORMALとは別シナリオ)をTDDで実装する。
 
 機能追加ごとに次を実行する。
 
