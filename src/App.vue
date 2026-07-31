@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import CityCanvas from './components/CityCanvas.vue'
 import { scenarioLabel } from './sim/model'
-import type { ExecutorType, Scenario, TimelineEvent } from './sim/types'
+import type { ExecutorType, FailoverPolicy, Scenario, TimelineEvent } from './sim/types'
 import { useSimulationStore } from './stores/simulation'
 
 const store = useSimulationStore()
@@ -13,6 +13,7 @@ const flushThreshold = ref(10)
 const failAtStatement = ref(6)
 const autoFlush = ref(true)
 const hangOnSigterm = ref(false)
+const failoverPolicy = ref<FailoverPolicy>('FAIL_JOB')
 let timer = 0
 
 const state = computed(() => store.snapshot)
@@ -35,6 +36,7 @@ function start(): void {
     failAtStatement: failAtStatement.value,
     autoFlush: autoFlush.value,
     hangOnSigterm: hangOnSigterm.value,
+    failoverPolicy: failoverPolicy.value,
   })
 }
 
@@ -108,7 +110,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
               <option value="ABNORMAL">異常終了 · 101</option>
               <option value="FLUSH_FAILURE">flush失敗 · 101</option>
               <option value="DB_CONNECT_FAILURE">DB接続失敗 · 101</option>
-              <option value="WRITER_FAILOVER">writer failover · 101</option>
+              <option value="WRITER_FAILOVER">writer failover · 方針依存</option>
               <option value="JVM_OOM">JVM OOM · 3</option>
               <option value="ECS_OOM_KILL">ECS OOM kill · 137</option>
               <option value="LAUNCH_FAILURE">TaskFailedToStart</option>
@@ -150,6 +152,16 @@ onBeforeUnmount(() => window.clearInterval(timer))
           <button v-if="state.phase === 'FLUSH_BATCH' && !state.flushRequested" class="w-full rounded-lg border border-amber-400/50 bg-amber-400/10 px-4 py-3 font-bold text-amber-200 transition hover:bg-amber-400/20" @click="store.flush">
             flushStatements()
           </button>
+
+          <div v-if="scenario === 'WRITER_FAILOVER'">
+            <p class="mb-1.5 text-sm text-slate-300">再接続後のアプリ方針</p>
+            <div class="grid grid-cols-2 gap-2">
+              <button v-for="policy in (['FAIL_JOB', 'RETRY_TASKLET'] as FailoverPolicy[])" :key="policy" :disabled="store.isActive" class="rounded-lg border px-3 py-2 text-sm font-semibold transition disabled:opacity-50" :class="failoverPolicy === policy ? 'border-sky-400 bg-sky-400/15 text-sky-200' : 'border-slate-700 bg-slate-900/60 text-slate-400'" @click="failoverPolicy = policy">
+                {{ policy === 'FAIL_JOB' ? 'Job FAILED' : 'Tasklet再試行' }}
+              </button>
+            </div>
+            <p class="mt-1.5 text-[10px] leading-4 text-slate-500">どちらもアプリ/Spring Batchの判断です。Wrapperが自動で再実行することはありません。</p>
+          </div>
 
           <label class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-300">
             <span>
@@ -254,9 +266,15 @@ onBeforeUnmount(() => window.clearInterval(timer))
           <ol v-else class="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
             <li v-for="result in state.batchResults" :key="result.flushIndex" class="min-w-0 rounded-lg border p-3 text-xs" :class="result.failedStatementIndex !== null ? 'border-red-400/40 bg-red-400/5' : 'border-slate-700/60 bg-slate-950/50'">
               <div class="flex items-center justify-between gap-3">
-                <span class="font-semibold" :class="result.failedStatementIndex !== null ? 'text-red-300' : 'text-sky-300'">flush #{{ result.flushIndex }}</span>
+                <span class="font-semibold" :class="result.failedStatementIndex !== null ? 'text-red-300' : 'text-sky-300'">
+                  flush #{{ result.flushIndex }}
+                  <span v-if="state.attempt > 1" class="mono ml-1 rounded border px-1 text-[10px]" :class="result.attempt < state.attempt ? 'border-slate-600 text-slate-500' : 'border-sky-500/50 text-sky-300'">attempt {{ result.attempt }}</span>
+                </span>
                 <span class="mono shrink-0 text-slate-400">parameters: {{ result.parameterCount }}</span>
               </div>
+              <p v-if="state.attempt > 1 && result.attempt < state.attempt" class="mt-1 text-[10px] text-slate-500">
+                失われたtransactionの結果 · 確定件数に含まれない
+              </p>
               <p class="mono mt-2 break-all text-slate-300">{{ result.mappedStatementId }}</p>
               <p class="mono mt-1 break-words text-[10px] leading-4 text-slate-500">{{ result.sql }}</p>
               <p v-if="result.failedStatementIndex !== null" class="mt-2 font-semibold text-red-300">

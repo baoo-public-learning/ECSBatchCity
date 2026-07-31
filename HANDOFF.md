@@ -189,9 +189,14 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - StopTaskのhang版: `config.hangOnSigterm=true`でSIGTERM後にshutdownがhang → 新phase `FORCE_KILL`(stopTimeout縮尺) → SIGKILL 137。jobRepositoryはSTARTED残留(STOPPINGはJobOperator.stop()がcommit済みの場合のみ、というCodex指摘を反映)。
 - いずれも`applicationExitCode`はnullのままで101へ変換しない(briefの禁止事項をテストで固定)。
 
+さらに済み(2026-08-01、failover retry policy):
+
+- `config.failoverPolicy: 'FAIL_JOB' | 'RETRY_TASKLET'`(default FAIL_JOB)。RETRY_TASKLETでは再接続後に`attempt`を進め、新しいtransactionでTaskletを最初から再実行して正常終了できる。
+- `BatchResult.attempt`と`state.attempt`を追加。updateCount合計は現在のattemptの結果のみから算出し、失われたattemptのBatchResultは「失われたtransactionの結果 · 確定件数に含まれない」バッジ付き診断として残る。
+- UIに「再接続後のアプリ方針」トグルと「どちらもアプリ/Spring Batchの判断であり、Wrapperは自動再実行しない」注記。
+
 残り:
 
-- 再接続後にTaskletを再試行するpolicy(`RETRY_TASKLET`)。attempt管理(旧attemptのBatchResultをupdateCount合計から除外する仕組み)が必要。
 - SQL例外の詳細表示
 
 ### P1: Java 21設定
@@ -244,6 +249,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `test/flush-failure.test.ts`: FLUSH_FAILURE、EXECUTE_FAILED配列、失敗位置、partial≠partial commitのtest
 - `test/aurora-failure.test.ts`: DB_CONNECT_FAILURE、writer failover、transaction LOST、再接続≠再実行のtest
 - `test/process-death.test.ts`: JVM_OOM(exit 3)、ECS_OOM_KILL(137/containerReason)、stopTimeout SIGKILL、STARTED残留のtest
+- `test/failover-retry.test.ts`: RETRY_TASKLET、attempt管理、旧attempt除外のtest
 - `test/store.test.ts`: Pinia store経由のreactive proxy回帰test(structuredClone対策)
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector

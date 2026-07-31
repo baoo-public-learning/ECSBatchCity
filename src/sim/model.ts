@@ -7,6 +7,7 @@ const DEFAULT_CONFIG: SimulationConfig = {
   flushThreshold: 10,
   failAtStatement: 6,
   hangOnSigterm: false,
+  failoverPolicy: 'FAIL_JOB',
   autoFlush: true,
   taskCpu: 1024,
   taskMemoryMiB: 2048,
@@ -155,6 +156,7 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
     transaction: 'NONE',
     writerHost: 'aurora-writer-1',
     failoverState: 'NONE',
+    attempt: 1,
     executorType: resolved.executorType,
     mapperCalls: 0,
     pendingStatements: 0,
@@ -198,8 +200,11 @@ function completeWork(state: SimulationState): void {
     return
   }
 
+  // 失われたattemptのupdate countsは確定件数に含めない。
   state.updateCount = state.executorType === 'BATCH'
-    ? state.batchResults.reduce((sum, result) => sum + result.updateCounts.reduce((a, b) => a + b, 0), 0)
+    ? state.batchResults
+      .filter((result) => result.attempt === state.attempt)
+      .reduce((sum, result) => sum + result.updateCounts.reduce((a, b) => a + b, 0), 0)
     : state.config.scenario === 'WARNING' ? 0 : state.config.statementCount
   enter(state, 'COMMIT')
 }
@@ -273,7 +278,7 @@ function advancePhase(state: SimulationState): void {
           completeWork(state)
           break
         }
-        if (state.config.scenario === 'WRITER_FAILOVER') {
+        if (state.config.scenario === 'WRITER_FAILOVER' && state.failoverState === 'NONE') {
           state.mapperCalls = state.config.failAtStatement
           state.sqlExecutions = state.config.failAtStatement
           state.transaction = 'LOST'
@@ -281,8 +286,8 @@ function advancePhase(state: SimulationState): void {
           enter(state, 'FAILOVER_DETECT')
           break
         }
-        state.mapperCalls = state.config.statementCount
-        state.sqlExecutions = state.config.statementCount
+        state.mapperCalls += state.config.statementCount
+        state.sqlExecutions += state.config.statementCount
         completeWork(state)
         break
       }
@@ -296,6 +301,7 @@ function advancePhase(state: SimulationState): void {
     case 'FLUSH_BATCH': {
       const pending = state.pendingStatements
       const failoverHere = state.config.scenario === 'WRITER_FAILOVER'
+        && state.failoverState === 'NONE'
         && state.config.failAtStatement > state.flushedStatements
         && state.config.failAtStatement <= state.flushedStatements + pending
       if (failoverHere) {
@@ -315,6 +321,7 @@ function advancePhase(state: SimulationState): void {
         // update countsを返す。-3は「未実行」ではなく「成功として保証できない」。
         state.batchResults.push({
           flushIndex: state.batchResults.length + 1,
+          attempt: state.attempt,
           mappedStatementId: 'RecordMapper.upsertRecord',
           sql: 'UPDATE records SET payload = ? WHERE id = ?',
           parameterCount: pending,
@@ -333,6 +340,7 @@ function advancePhase(state: SimulationState): void {
       const perStatementUpdateCount = state.config.scenario === 'WARNING' ? 0 : 1
       state.batchResults.push({
         flushIndex: state.batchResults.length + 1,
+        attempt: state.attempt,
         mappedStatementId: 'RecordMapper.upsertRecord',
         sql: 'UPDATE records SET payload = ? WHERE id = ?',
         parameterCount: pending,
@@ -395,13 +403,24 @@ function advancePhase(state: SimulationState): void {
     case 'RECONNECT':
       state.writerHost = 'aurora-writer-2'
       state.failoverState = 'RECONNECTED'
+      event(state, 'new writerへ再接続 · TransactionStateUnknownSQLException(08007)', 'error')
+      if (state.config.failoverPolicy === 'RETRY_TASKLET') {
+        state.attempt += 1
+        state.transaction = 'ACTIVE'
+        state.mapperCalls = 0
+        state.pendingStatements = 0
+        state.flushedStatements = 0
+        event(state, `アプリ方針によりTaskletを再試行 · attempt ${state.attempt} · 新しいtransactionを開始`, 'warning')
+        event(state, '再試行はSpring Batch/アプリの判断であり、Wrapperの自動機能ではない', 'warning')
+        enter(state, 'RUN_TASKLET')
+        break
+      }
       state.batchStatus = 'FAILED'
       state.batchExitStatus = 'FAILED'
       state.applicationResult = 'ABNORMAL'
       state.applicationExitCode = 101
       state.springStatus = 'FAILED'
       state.updateCount = null
-      event(state, 'new writerへ再接続 · TransactionStateUnknownSQLException(08007)', 'error')
       event(state, '再接続はtransactionの再実行ではない · 中断transactionの結果は不明のままJob FAILED', 'error')
       enter(state, 'CLOSE_SPRING')
       break

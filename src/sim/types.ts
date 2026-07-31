@@ -27,6 +27,9 @@ export type Scenario =
 export type TransactionStatus = 'NONE' | 'ACTIVE' | 'COMMITTED' | 'ROLLED_BACK' | 'LOST'
 
 export type FailoverState = 'NONE' | 'DETECTING' | 'REFRESHING_TOPOLOGY' | 'RECONNECTED'
+
+// 再接続後の方針はアプリ/Spring Batch側の判断であり、Wrapperの機能ではない。
+export type FailoverPolicy = 'FAIL_JOB' | 'RETRY_TASKLET'
 export type ApplicationResult = 'PENDING' | 'NORMAL' | 'WARNING' | 'ABNORMAL' | 'PLATFORM_FAILURE'
 
 export type Phase =
@@ -52,6 +55,7 @@ export type Phase =
 
 export interface BatchResult {
   flushIndex: number
+  attempt: number
   mappedStatementId: string
   sql: string
   parameterCount: number
@@ -74,6 +78,7 @@ export interface SimulationConfig {
   flushThreshold: number
   failAtStatement: number
   hangOnSigterm: boolean
+  failoverPolicy: FailoverPolicy
   autoFlush: boolean
   taskCpu: number
   taskMemoryMiB: number
@@ -96,6 +101,7 @@ export interface SimulationState {
   transaction: TransactionStatus
   writerHost: string
   failoverState: FailoverState
+  attempt: number
   executorType: ExecutorType
   mapperCalls: number
   pendingStatements: number
