@@ -64,6 +64,17 @@ describe('stop timeout SIGKILL', () => {
     expect(done.batchStatus).toBe('STARTED')
   })
 
+  it('ignores a second StopTask while waiting out the stop timeout', () => {
+    let state = tick(runTask({ scenario: 'NORMAL', executorType: 'BATCH', hangOnSigterm: true }), 6)
+    state = stopTask(state)
+    expect(state.phase).toBe('FORCE_KILL')
+    const again = stopTask(tick(state, 0.5))
+    expect(again.phase).toBe('FORCE_KILL')
+    expect(again.events.filter((entry) => entry.label.includes('SIGTERMを送信'))).toHaveLength(1)
+    const done = runToCompletion(again)
+    expect(done.containerExitCode).toBe(137)
+  })
+
   it('ignores StopTask once the container is already stopping', () => {
     let state = runTask({ scenario: 'NORMAL', executorType: 'BATCH', hangOnSigterm: true })
     let guard = 0

@@ -470,7 +470,7 @@ export function stopTask(source: SimulationState): SimulationState {
   const state = structuredClone(source)
   if (state.ecsStatus === 'IDLE' || state.ecsStatus === 'STOPPED') return state
   state.desiredStatus = 'STOPPED'
-  if (state.phase === 'CLOSE_SPRING' || state.phase === 'STOP_CONTAINER' || state.phase === 'RELEASE_ENI' || state.phase === 'DONE') {
+  if (state.phase === 'FORCE_KILL' || state.phase === 'CLOSE_SPRING' || state.phase === 'STOP_CONTAINER' || state.phase === 'RELEASE_ENI' || state.phase === 'DONE') {
     event(state, 'StopTask · 既に停止処理中のため終了結果は変更されない')
     return state
   }

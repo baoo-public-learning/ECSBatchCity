@@ -110,6 +110,9 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - desktopで確認済み: BATCH正常(threshold 10単発flush / threshold 4で3回flushとBatchResult 3件蓄積)、autoFlush OFFでthresholdごとの停止と手動flushStatements()、StopTaskでSIGTERM→143→TX ROLLED_BACK→PENDING 0→FLUSHED保持、BatchResultパネル表示、timeline文言、console errorなし(修正後)。
 - 2026-08-01に追加確認: ABNORMAL(FAILED/101/赤表示/BatchResult診断保持)、LAUNCH_FAILURE(TaskFailedToStart/Spring未起動/exit —)、WARNING×SIMPLE(SIMPLE時のBATCH系UI非表示、更新0件→WARNING→exit 1)、FLUSH_FAILURE(global 6件目→flush #2内2件目のBatchUpdateException、全件×=EXECUTE_FAILED表示、合計—(保証なし)、101)。
 - 同日、Aurora障害2シナリオも公開ページで確認: WRITER_FAILOVER(接続喪失→検出→topology更新→writer-2再接続→08007→TX LOST→101、中断flushのBatchResultなし、RECONNECTED注記表示)、DB_CONNECT_FAILURE(TX NONEのまま、Tasklet未実行、CannotGetJdbcConnection→CannotCreateTransaction→101)。console errorなし。
+- 同日、RETRY_TASKLET(attempt 1喪失→attempt 2で全件再実行→COMMIT→exit 0、attemptバッジと「確定件数に含まれない」表示)、JVM_OOM(Spring exit —のままContainer exit 3、STARTED残留)、ECS_OOM_KILL(137、container reasonとtask stoppedReasonの区別表示)も公開ページで確認。
+- hang SIGTERM経路はSIGTERM→hang→stopTimeout待機のtimelineまで公開ページで確認(完走はタブのthrottlingにより未確認、ユニットテストで検証済み)。このQAでFORCE_KILL中の再StopTaskによるイベント重複バグを発見し修正済み。
+- 既知の軽微な違和感: RUNNING前(PROVISIONING等)のStopTask+hangでもSIGTERM/hangのイベントが出る。実ECSではcontainer未起動のためSIGTERM対象がない。将来phase別のStopTask表現を整えるときに直す。
 - 未実施: mobile幅QA(Chromeウィンドウのresizeが常に無効、DevTools device emulationも拡張にブロックされたため。実機または別環境で確認すること)。
 - 補足: バックグラウンドタブではChromeのtimer throttlingとdelta cap(0.25s)によりシミュレーション進行が実時間より遅くなる。バグではない。
 
