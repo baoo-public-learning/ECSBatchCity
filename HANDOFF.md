@@ -182,16 +182,17 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `WRITER_FAILOVER`シナリオ: `failAtStatement`を含むflush(SIMPLEはSQL実行)中にwriter障害 → `FAILOVER_DETECT` → `TOPOLOGY_REFRESH` → `RECONNECT`のphase遷移でwriter-2へ再接続。transactionは`LOST`(`TransactionStateUnknownSQLException` / SQLState 08007。08S02はtransaction外の別物なので使わない — Codex調査)。再接続≠再実行としてJob FAILED → 101。中断flushはBatchResultを生成しない(本モデル上の定義)。
 - 状態追加: `writerHost`、`failoverState`、`TransactionStatus 'LOST'`。UIにWriter host / Failover表示と「RECONNECTEDは接続状態でありtransaction再実行を意味しない」注記。
 
+さらに済み(2026-08-01、OOMとSIGKILL):
+
+- `JVM_OOM`シナリオ: heap枯渇 → `-XX:+ExitOnOutOfMemoryError`でJVM即終了。exit codeは3(OpenJDK 21の`os::_exit(3)`、Codex調査で確定)。shutdown hookなし、Spring exit codeはnullのまま、jobRepositoryにはSTARTEDが残る(次回起動前にrecoverまたは手動修復が必要)。
+- `ECS_OOM_KILL`シナリオ: task memory limit超過 → SIGKILL → container exitCode 137。taskの`stoppedReason`は標準の`Essential container in task exited`のままとし、`OutOfMemoryError: Container killed due to memory usage`は**container側のreason**として新フィールド`containerReason`で区別(task metadataとcontainer metadataの区別)。
+- StopTaskのhang版: `config.hangOnSigterm=true`でSIGTERM後にshutdownがhang → 新phase `FORCE_KILL`(stopTimeout縮尺) → SIGKILL 137。jobRepositoryはSTARTED残留(STOPPINGはJobOperator.stop()がcommit済みの場合のみ、というCodex指摘を反映)。
+- いずれも`applicationExitCode`はnullのままで101へ変換しない(briefの禁止事項をテストで固定)。
+
 残り:
 
 - 再接続後にTaskletを再試行するpolicy(`RETRY_TASKLET`)。attempt管理(旧attemptのBatchResultをupdateCount合計から除外する仕組み)が必要。
 - SQL例外の詳細表示
-- JVM `OutOfMemoryError`
-- `-XX:+ExitOnOutOfMemoryError`
-- ECS memory limitによる停止
-- SIGTERM graceful shutdown
-- stop timeout後のSIGKILL
-- アプリが制御できない終了を`101`へ変換しないテスト
 
 ### P1: Java 21設定
 
@@ -242,6 +243,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `test/mybatis-flush.test.ts`: flushThreshold、複数flush、BatchResult、手動flushゲートのtest
 - `test/flush-failure.test.ts`: FLUSH_FAILURE、EXECUTE_FAILED配列、失敗位置、partial≠partial commitのtest
 - `test/aurora-failure.test.ts`: DB_CONNECT_FAILURE、writer failover、transaction LOST、再接続≠再実行のtest
+- `test/process-death.test.ts`: JVM_OOM(exit 3)、ECS_OOM_KILL(137/containerReason)、stopTimeout SIGKILL、STARTED残留のtest
 - `test/store.test.ts`: Pinia store経由のreactive proxy回帰test(structuredClone対策)
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector

@@ -6,6 +6,7 @@ const DEFAULT_CONFIG: SimulationConfig = {
   statementCount: 10,
   flushThreshold: 10,
   failAtStatement: 6,
+  hangOnSigterm: false,
   autoFlush: true,
   taskCpu: 1024,
   taskMemoryMiB: 2048,
@@ -25,6 +26,7 @@ const PHASE_DURATION: Record<Phase, number> = {
   FAILOVER_DETECT: 0.8,
   TOPOLOGY_REFRESH: 0.9,
   RECONNECT: 0.7,
+  FORCE_KILL: 1.2,
   COMMIT: 0.65,
   ROLLBACK: 0.65,
   CLOSE_SPRING: 0.7,
@@ -86,6 +88,9 @@ function enter(state: SimulationState, phase: Phase): void {
     case 'RECONNECT':
       event(state, 'aurora-writer-2へ再接続を試行', 'warning')
       break
+    case 'FORCE_KILL':
+      event(state, 'ECS stopTimeoutを待機(縮尺表示)', 'warning')
+      break
     case 'FLUSH_BATCH':
       state.flushRequested = state.config.autoFlush
       if (state.mapperCalls >= state.config.statementCount && state.pendingStatements < state.config.flushThreshold) {
@@ -111,7 +116,7 @@ function enter(state: SimulationState, phase: Phase): void {
     case 'STOP_CONTAINER':
       state.ecsStatus = 'STOPPING'
       state.springStatus = state.springStatus === 'FAILED' ? 'FAILED' : 'CLOSED'
-      state.containerExitCode = state.applicationExitCode
+      state.containerExitCode = state.containerExitCode ?? state.applicationExitCode
       event(state, `JVM process終了 · container exitCode ${state.containerExitCode ?? '—'}`)
       break
     case 'RELEASE_ENI':
@@ -163,6 +168,7 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
     containerExitCode: null,
     stopCode: null,
     stoppedReason: null,
+    containerReason: null,
     java: {
       version: 21,
       taskCpu: resolved.taskCpu,
@@ -238,6 +244,27 @@ function advancePhase(state: SimulationState): void {
       enter(state, 'RUN_TASKLET')
       break
     case 'RUN_TASKLET': {
+      if (state.config.scenario === 'JVM_OOM' || state.config.scenario === 'ECS_OOM_KILL') {
+        state.mapperCalls = state.config.failAtStatement
+        state.applicationResult = 'PLATFORM_FAILURE'
+        state.springStatus = 'FAILED'
+        state.pendingStatements = 0
+        state.transaction = state.transaction === 'ACTIVE' ? 'ROLLED_BACK' : state.transaction
+        if (state.config.scenario === 'JVM_OOM') {
+          state.containerExitCode = 3
+          event(state, 'heap枯渇 · java.lang.OutOfMemoryError: Java heap space', 'error')
+          event(state, 'ExitOnOutOfMemoryError · shutdown hookなしでJVM即終了 exit 3', 'error')
+        } else {
+          state.containerExitCode = 137
+          state.containerReason = 'OutOfMemoryError: Container killed due to memory usage'
+          event(state, 'containerがtask memory limitを超過', 'error')
+          event(state, 'container runtimeがSIGKILL · exitCode 137', 'error')
+        }
+        event(state, 'jobRepositoryにはSTARTEDが残る · 次回起動前にrecoverまたは手動修復が必要', 'warning')
+        event(state, 'DBが接続断を検出し未commit変更をrollback')
+        enter(state, 'STOP_CONTAINER')
+        break
+      }
       if (state.executorType === 'SIMPLE') {
         if (state.config.scenario === 'FLUSH_FAILURE') {
           state.mapperCalls = state.config.failAtStatement
@@ -349,6 +376,16 @@ function advancePhase(state: SimulationState): void {
       event(state, 'ROLLBACK完了 · Job FAILED', 'error')
       enter(state, 'CLOSE_SPRING')
       break
+    case 'FORCE_KILL':
+      state.containerExitCode = 137
+      state.applicationResult = 'PLATFORM_FAILURE'
+      state.springStatus = 'FAILED'
+      state.pendingStatements = 0
+      state.transaction = state.transaction === 'ACTIVE' ? 'ROLLED_BACK' : state.transaction
+      event(state, 'stopTimeout経過 · SIGKILL exitCode 137', 'error')
+      event(state, 'jobRepositoryにはSTARTEDが残る · graceful shutdownは完了していない', 'warning')
+      enter(state, 'STOP_CONTAINER')
+      break
     case 'FAILOVER_DETECT':
       enter(state, 'TOPOLOGY_REFRESH')
       break
@@ -414,6 +451,16 @@ export function stopTask(source: SimulationState): SimulationState {
   const state = structuredClone(source)
   if (state.ecsStatus === 'IDLE' || state.ecsStatus === 'STOPPED') return state
   state.desiredStatus = 'STOPPED'
+  if (state.phase === 'CLOSE_SPRING' || state.phase === 'STOP_CONTAINER' || state.phase === 'RELEASE_ENI' || state.phase === 'DONE') {
+    event(state, 'StopTask · 既に停止処理中のため終了結果は変更されない')
+    return state
+  }
+  if (state.config.hangOnSigterm) {
+    event(state, 'StopTask · SIGTERMを送信', 'warning')
+    event(state, 'shutdownがTasklet完了待ちでhang · graceful shutdownが進まない', 'warning')
+    enter(state, 'FORCE_KILL')
+    return state
+  }
   state.applicationResult = 'PLATFORM_FAILURE'
   state.applicationExitCode = 143
   state.batchStatus = state.batchStatus === 'STARTED' ? 'STOPPED' : state.batchStatus
@@ -432,5 +479,5 @@ export function runToCompletion(state: SimulationState, step = 0.25): Simulation
 }
 
 export function scenarioLabel(scenario: Scenario): string {
-  return { NORMAL: '正常終了', WARNING: '警告終了', ABNORMAL: '異常終了', FLUSH_FAILURE: 'flush失敗', DB_CONNECT_FAILURE: 'DB接続失敗', WRITER_FAILOVER: 'writer failover', LAUNCH_FAILURE: '起動失敗' }[scenario]
+  return { NORMAL: '正常終了', WARNING: '警告終了', ABNORMAL: '異常終了', FLUSH_FAILURE: 'flush失敗', DB_CONNECT_FAILURE: 'DB接続失敗', WRITER_FAILOVER: 'writer failover', JVM_OOM: 'JVM OOM', ECS_OOM_KILL: 'ECS OOM kill', LAUNCH_FAILURE: '起動失敗' }[scenario]
 }

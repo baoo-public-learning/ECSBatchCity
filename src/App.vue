@@ -12,6 +12,7 @@ const statementCount = ref(10)
 const flushThreshold = ref(10)
 const failAtStatement = ref(6)
 const autoFlush = ref(true)
+const hangOnSigterm = ref(false)
 let timer = 0
 
 const state = computed(() => store.snapshot)
@@ -33,6 +34,7 @@ function start(): void {
     flushThreshold: flushThreshold.value,
     failAtStatement: failAtStatement.value,
     autoFlush: autoFlush.value,
+    hangOnSigterm: hangOnSigterm.value,
   })
 }
 
@@ -107,6 +109,8 @@ onBeforeUnmount(() => window.clearInterval(timer))
               <option value="FLUSH_FAILURE">flush失敗 · 101</option>
               <option value="DB_CONNECT_FAILURE">DB接続失敗 · 101</option>
               <option value="WRITER_FAILOVER">writer failover · 101</option>
+              <option value="JVM_OOM">JVM OOM · 3</option>
+              <option value="ECS_OOM_KILL">ECS OOM kill · 137</option>
               <option value="LAUNCH_FAILURE">TaskFailedToStart</option>
             </select>
           </label>
@@ -130,7 +134,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <input v-model.number="flushThreshold" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-sky-400 disabled:opacity-50" />
           </label>
 
-          <label v-if="scenario === 'FLUSH_FAILURE' || scenario === 'WRITER_FAILOVER'" class="block text-sm text-slate-300">
+          <label v-if="['FLUSH_FAILURE', 'WRITER_FAILOVER', 'JVM_OOM', 'ECS_OOM_KILL'].includes(scenario)" class="block text-sm text-slate-300">
             障害発生statement位置 <span class="mono float-right text-red-300">{{ Math.min(failAtStatement, statementCount) }}件目</span>
             <input v-model.number="failAtStatement" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-red-400 disabled:opacity-50" />
           </label>
@@ -146,6 +150,14 @@ onBeforeUnmount(() => window.clearInterval(timer))
           <button v-if="state.phase === 'FLUSH_BATCH' && !state.flushRequested" class="w-full rounded-lg border border-amber-400/50 bg-amber-400/10 px-4 py-3 font-bold text-amber-200 transition hover:bg-amber-400/20" @click="store.flush">
             flushStatements()
           </button>
+
+          <label class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-300">
+            <span>
+              SIGTERMでhangする
+              <span class="block text-[10px] text-slate-500">ON: StopTask後にstopTimeout経過でSIGKILL 137</span>
+            </span>
+            <input v-model="hangOnSigterm" :disabled="store.isActive" type="checkbox" class="size-4 shrink-0 accent-red-400 disabled:opacity-50" />
+          </label>
 
           <div class="grid grid-cols-2 gap-2 pt-2">
             <button :disabled="store.isActive" class="rounded-lg bg-sky-400 px-4 py-3 font-bold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-40" @click="start">RunTask</button>
@@ -201,11 +213,18 @@ onBeforeUnmount(() => window.clearInterval(timer))
             ['App result', state.applicationResult],
             ['Spring exit', state.applicationExitCode ?? '—'],
             ['Container exit', state.containerExitCode ?? '—'],
+            ['Stop code', state.stopCode ?? '—'],
+            ['Stopped reason', state.stoppedReason ?? '—'],
           ]" :key="String(item[0])" class="rounded-lg border border-slate-700/60 bg-slate-950/45 p-2.5">
             <p class="text-slate-500">{{ item[0] }}</p>
-            <p class="mono mt-1 font-bold text-slate-100">{{ item[1] }}</p>
+            <p class="mono mt-1 break-words font-bold text-slate-100">{{ item[1] }}</p>
           </div>
         </div>
+
+        <p v-if="state.containerReason" class="mt-2 rounded-lg border border-red-400/40 bg-red-400/5 p-2.5 text-xs text-red-200">
+          container reason: <span class="mono">{{ state.containerReason }}</span>
+          <span class="mt-1 block text-[10px] text-slate-500">containerのreasonとtaskのstoppedReasonは別のmetadataです。</span>
+        </p>
 
         <div class="mt-5 rounded-xl border border-slate-700/60 bg-slate-950/50 p-3">
           <div class="flex items-center justify-between text-xs">
