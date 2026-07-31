@@ -104,7 +104,12 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - GitHub Pages deploy: passed
 - 公開HTML / JS / CSS: HTTP 200
 
-ブラウザ自動操作環境が利用できなかったため、実際のクリック操作、desktop/mobile screenshot、見た目の目視確認は未実施。次のセッションでは最優先で行うこと。
+2026-07-31にChrome自動操作で公開ページのdesktop QAを実施した。
+
+- 重大バグを発見し修正済み: Piniaのdeep reactive proxyを`tick()`の`structuredClone()`へ渡していたため`DataCloneError`が毎フレーム発生し、公開ページではRunTask後にPROVISIONINGで完全に停止していた(MVP当初からの潜在バグ。純粋関数テストでは検出不能)。storeをプレーンなモジュール変数+shallowRef公開に変更し、Pinia storeテスト4件で回帰防止した。
+- desktopで確認済み: BATCH正常(threshold 10単発flush / threshold 4で3回flushとBatchResult 3件蓄積)、autoFlush OFFでthresholdごとの停止と手動flushStatements()、StopTaskでSIGTERM→143→TX ROLLED_BACK→PENDING 0→FLUSHED保持、BatchResultパネル表示、timeline文言、console errorなし(修正後)。
+- 未実施: mobile幅QA(Chromeウィンドウがフルスクリーンでresize不可だったため)。WARNING / ABNORMAL / LAUNCH_FAILURE / SIMPLEの目視確認(simulationテストでは検証済み)。次のセッションで実施すること。
+- 補足: バックグラウンドタブではChromeのtimer throttlingとdelta cap(0.25s)によりシミュレーション進行が実時間より遅くなる。バグではない。
 
 ## 重要な設計境界
 
