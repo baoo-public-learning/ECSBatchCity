@@ -29,3 +29,5 @@ npm run dev
 MVPは静的なブラウザシミュレーターとして実装し、AWS認証情報や実AWS環境を必要としない構成にします。
 
 VueはHUDと操作画面、PiniaはUIとシミュレーションの連携状態、Three.jsは3D描画、Tailwind CSSはDOM UIのスタイルを担当します。ECSやSpring Batchの状態遷移そのものは、フレームワークに依存しない純粋なTypeScriptモデルとして実装します。
+
+現在の実装状況と次の作業は[HANDOFF.md](HANDOFF.md)を参照してください。

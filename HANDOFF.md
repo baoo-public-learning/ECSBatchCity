@@ -1,0 +1,232 @@
+# ECSBatchCity handoff
+
+最終更新: 2026-07-31
+
+## 現在地
+
+ECSBatchCityは完成版ではなく、指示書の主要レイヤーを1本につないだ「動作する縦切りMVP」である。
+
+- Repository: <https://github.com/baoo-public-learning/ECSBatchCity>
+- GitHub Pages: <https://baoo-public-learning.github.io/ECSBatchCity/>
+- MVP commit: `10edcd8 feat: build ECS batch simulator`
+- Default branch: `main`
+
+GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがHTTP 200を返すことも確認済み。
+
+## 次のセッションの開始手順
+
+1. リポジトリをcloneまたは最新の`main`へ更新する。
+2. `AGENTS.md`を読む。
+3. `CLAUDE.md`を読む。
+4. `IMPLEMENTATION_BRIEF.md`を全文読む。
+5. この`HANDOFF.md`を読む。
+6. `npm install`を実行する。
+7. 変更前に`npm test`、`npm run typecheck`、`npm run build`を実行してbaselineを確認する。
+
+## 実装済み
+
+### アプリケーション基盤
+
+- Vue 3
+- Composition APIと`<script setup lang="ts">`
+- Pinia
+- Tailwind CSS
+- Three.js
+- Vite
+- TypeScript strict mode
+- Vitest
+- `vue-tsc`
+- GitHub Actions CI
+- GitHub Pages workflow
+
+### シミュレーション
+
+- `RunTask`
+- `StopTask`
+- ECS Task lifecycle
+  - `PROVISIONING`
+  - `PENDING`
+  - `ACTIVATING`
+  - `RUNNING`
+  - `STOPPING`
+  - `DEPROVISIONING`
+  - `STOPPED`
+- `desiredStatus`と実状態の分離
+- Fargate / `awsvpc`の簡略モデル
+- Java 21 container設定
+- Spring Boot lifecycle
+- Spring Batch Job / TaskletStep
+- Tasklet `FINISHED`
+- Spring transaction
+- MyBatis Mapper呼び出し
+- `ExecutorType.SIMPLE`
+- `ExecutorType.BATCH`
+- pending batch
+- 手動`flushStatements()`
+- 自動flush
+- commit / rollback
+- AWS Advanced JDBC WrapperからAurora writerまでの表示
+- 正常終了`0`
+- 警告終了`1`
+- 異常終了`101`
+- platform initiated stop `143`
+- `TaskFailedToStart`
+- lifecycle event timeline
+
+### 画面
+
+- RunTask設定パネル
+- 正常、警告、異常、起動失敗の選択
+- SIMPLE / BATCHの選択
+- Mapper呼び出し数
+- flush threshold表示
+- 自動flush切り替え
+- 手動flushボタン
+- StopTaskボタン
+- ECS、Spring、Batch、transaction状態
+- pending / flushed statement数
+- framework、application、container終了情報
+- Java 21、task CPU、task memory、最大heap表示
+- 6レイヤーのThree.jsシーン
+- active layerと処理フローのアニメーション
+
+## 現在の検証結果
+
+- `npm test`: 10 tests passed
+- `npm run typecheck`: passed
+- `npm run build`: passed
+- production dependency audit: 0 known vulnerabilities
+- GitHub Pages build: passed
+- GitHub Pages deploy: passed
+- 公開HTML / JS / CSS: HTTP 200
+
+ブラウザ自動操作環境が利用できなかったため、実際のクリック操作、desktop/mobile screenshot、見た目の目視確認は未実施。次のセッションでは最優先で行うこと。
+
+## 重要な設計境界
+
+- `src/sim`はVue、Pinia、Three.js、Tailwind CSS、DOMをimportしない。
+- Vue componentはシミュレーション状態を直接変更しない。
+- Pinia actionから純粋なsimulation commandを呼ぶ。
+- Three.js objectをPiniaへ保存しない。
+- Three.js rendererがscene graphとper-frame状態を所有する。
+- 表示、timeline、metricsは同じsimulation snapshotから生成する。
+- wall clock、ネットワーク、AWS、DOM、GPUをsimulation testへ持ち込まない。
+
+## 絶対に維持する意味上の区別
+
+- ECS `RUNNING`はBatch Job成功を意味しない。
+- Tasklet `FINISHED`はprocess exit code `0`を意味しない。
+- Spring Batch `BatchStatus`と`ExitStatus`は別物。
+- application resultとSpring exit codeは別物。
+- Spring exit codeとcontainer exit codeは伝搬するが、常に同じとは限らない。
+- container exit codeとECS `stopCode` / `stoppedReason`は別物。
+- `flushStatements()`はcommitではない。
+- flush済み、commit前の変更は未確定でありrollbackできる。
+- BATCHのMapper呼び出し時点では最終update countは確定しない。
+- partial update countsはpartial commitを意味しない。
+- AWS Advanced JDBC WrapperはPostgreSQL JDBC Driverそのものではない。
+- writerへの再接続は失敗transactionの安全な自動再実行を意味しない。
+
+## 既知の不足と推奨順序
+
+### P0: 画面QA
+
+- 公開ページをdesktop幅で開く。
+- RunTaskの正常、警告、異常、起動失敗を操作する。
+- SIMPLE / BATCHのSQL実行数とpending / flushed表示を確認する。
+- 自動flushをOFFにして、手動flushまで停止することを確認する。
+- StopTaskの`143`とrollbackを確認する。
+- browser consoleのerrorを確認する。
+- mobile幅で操作不能、overflow、文字切れがないか確認する。
+- screenshotを保存して目視する。
+
+### P1: MyBatisモデルの完成度
+
+- `flushThreshold`を実際のsimulation behaviorへ接続する。現在はUIとconfigに存在するが、statementCount途中での複数flushには未対応。
+- 複数回flushを実装する。
+- `BatchResult`一覧を表示する。
+- mapped statement ID、parameter count、update countsを表示する。
+- `BatchUpdateException`の失敗位置とpartial update countsを実装する。
+- partial update countsをpartial commitと表示しないテストを追加する。
+- commit時に未flush batchがflushされる専用シナリオを追加する。
+
+### P1: 終了と障害
+
+- Aurora接続失敗
+- SQL例外の詳細
+- writer failoverの状態遷移
+- wrapper topology refresh
+- 再接続後にJobを失敗させる場合と再試行する場合
+- JVM `OutOfMemoryError`
+- `-XX:+ExitOnOutOfMemoryError`
+- ECS memory limitによる停止
+- SIGTERM graceful shutdown
+- stop timeout後のSIGKILL
+- アプリが制御できない終了を`101`へ変換しないテスト
+
+### P1: Java 21設定
+
+- task CPUの操作
+- task memoryの操作
+- `InitialRAMPercentage`
+- `MaxRAMPercentage`
+- JVMが認識したCPU数
+- heap / metaspace / native memoryの区別
+- GC名とGC activity
+- `JAVA_TOOL_OPTIONS`表示
+- memory設定によるOOMシナリオ
+
+### P2: 3D表現
+
+- 現在の抽象boxを、ECS、container、Spring、MyBatis、JDBC、Auroraの意味が分かる建築へ発展させる。
+- 3D内の各地区へラベルを付ける。
+- hover / click pickingを実装する。
+- 選択対象とInspectorを接続する。
+- camera focusとresetを実装する。
+- ENI作成、image pull、JVM起動、SQL、flush、commit、rollbackを別のflowとして表現する。
+- reduced motionへ対応する。
+- GPU resource disposeの自動テストを追加する。
+
+### P2: Vue / Piniaテスト
+
+- Pinia action test
+- `RunTask` control component test
+- exit code panel test
+- warning `1`を非ゼロとして表示するtest
+- manual flush button test
+- component unmount時のrenderer / listener cleanup test
+- accessibility test
+
+### P2: 配信と保守
+
+- production bundleが約613 kBで、500 kB warningが出ている。Three.jsのlazy loadまたはmanual chunk分割を検討する。
+- GitHub ActionsからNode.js 20 action runtimeのdeprecation warningが出る。利用中actionの対応版が公開されたら更新する。
+- repository licenseが未決定。所有者が方針を決めて`LICENSE`を追加する。
+- Open Graph metadataとsocial previewは未設定。
+
+## 現在の主要ファイル
+
+- `IMPLEMENTATION_BRIEF.md`: 完成仕様と禁止事項
+- `src/sim/types.ts`: simulation contract
+- `src/sim/model.ts`: deterministic state machine
+- `test/model.test.ts`: lifecycle、exit code、MyBatis executor test
+- `src/stores/simulation.ts`: Piniaとsimulationの接続
+- `src/App.vue`: 現在の操作UIとInspector
+- `src/components/CityCanvas.vue`: VueとThree.js rendererのlifecycle接続
+- `src/three/create-world-renderer.ts`: Three.js scene graph
+- `.github/workflows/ci.yml`: pull request検証
+- `.github/workflows/pages.yml`: GitHub Pages deploy
+
+## 次の推奨タスク
+
+最初のタスクは「公開ページのdesktop/mobile目視QAと、見つかった不具合の修正」にする。その後、`flushThreshold`をsimulationへ接続し、複数flushと`BatchResult`をTDDで実装する。
+
+機能追加ごとに次を実行する。
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+見た目が変わる場合はbrowserでdesktopとmobileを確認し、console errorとscreenshotをレビューする。完了後にConventional Commitで`main`へpushし、GitHub Pagesのdeploy成功まで確認する。
