@@ -62,15 +62,82 @@ MVP に含めないもの:
 
 ## 4. 技術スタック
 
+- Vue 3
+- Composition APIと`<script setup lang="ts">`
+- Pinia
+- Tailwind CSS
 - TypeScript strict mode
 - Three.js
 - Vite
 - Vitest
+- Vue Test Utils
+- `vue-tsc`
 - HTML / CSS
 - Node.js 22 以上を開発・ビルドに使用
-- フロントエンドフレームワークは初版では使用しない
 
 3Dアプリの実行時依存を増やす場合は、必要性、bundleへの影響、ライセンス、メンテナンス性を設計記録に残すこと。外部CDN、外部フォント、テレメトリ、実AWS API呼び出しを無断で追加しない。
+
+### フロントエンドの責務分担
+
+- VueはHUD、操作パネル、Inspector、timeline、モーダルなどのDOM UIを担当する。
+- Piniaはユーザー操作、シナリオ設定、選択状態、再生状態、シミュレーションsnapshotの公開を担当する。
+- 純粋なTypeScript simulationは状態遷移、時間発展、終了コード変換、シナリオ判定を担当する。
+- Three.jsはscene、camera、mesh、material、flow、picking、毎フレームの補間を担当する。
+- Tailwind CSSはVueが生成するDOM UIを担当する。Three.js materialの定義には使用しない。
+- Viteは開発サーバーとproduction buildを担当する。
+
+依存方向は次に固定する。
+
+```text
+Vue component
+  -> Pinia action
+  -> pure simulation command
+  -> simulation snapshot
+  -> Pinia state
+  -> Vue UI / Three.js presentation
+```
+
+純粋なsimulation moduleはVue、Pinia、Three.js、Tailwind CSS、DOMをimportしない。Vue componentやThree.js objectがモデル状態を直接変更してはならない。
+
+### Piniaの使用制約
+
+Pinia storeに次を格納してよい。
+
+- シミュレーションの公開snapshot
+- seed、scenario、knob
+- 再生、停止、速度
+- 選択中のtask、container、Job、DB connection
+- panel、dialog、camera focusなどのUI状態
+- `RunTask`、`StopTask`、scenario変更などのcommand action
+
+Pinia storeに次を格納しない。
+
+- `THREE.Scene`、`Object3D`、`Mesh`、`Material`、`Texture`
+- renderer、camera、WebGL context
+- per-frame scratch vector
+- 数千個のparticleやflow object
+- simulationの時間発展ロジックそのもの
+
+毎フレームPiniaの巨大なreactive treeを書き換えない。Three.jsの補間と一時的な描画状態はrenderer内に保持し、UI向けsnapshotは必要な頻度でのみ公開する。
+
+### Tailwind CSSの使用方針
+
+Tailwind CSSはVite pluginとして導入し、Vue SFC内のDOM UIへ使用する。状態色はTailwindの色名へ直接依存させず、CSS custom propertiesでsemantic tokenを定義する。
+
+```css
+@import "tailwindcss";
+
+:root {
+  --status-normal: #22c55e;
+  --status-warning: #f59e0b;
+  --status-abnormal: #ef4444;
+  --status-platform: #a855f7;
+  --status-running: #38bdf8;
+  --status-stopped: #64748b;
+}
+```
+
+Vue UIとThree.js themeは同じsemantic tokenの値を参照し、正常、警告、異常、platform failureの意味色を一致させる。色だけに意味を持たせず、文字、形、iconを併用する。
 
 ## 5. 全体モデル
 
@@ -521,12 +588,31 @@ SQL実行中にwriter障害
 
 ```text
 src/
-  core/
+  components/
+    scene/
+      CityCanvas.vue
+    hud/
+      StatusBar.vue
+      LifecycleTimeline.vue
+      ExitCodePanel.vue
+    controls/
+      RunTaskPanel.vue
+      JavaSettingsPanel.vue
+      ScenarioPanel.vue
+    inspector/
+      TaskInspector.vue
+      ContainerInspector.vue
+      SpringInspector.vue
+      DatabaseInspector.vue
+  stores/
+    simulation.ts
+    scenario.ts
+    ui.ts
+  types/
     types.ts
-    bus.ts
-    registry.ts
-    theme.ts
   sim/
+    model.ts
+    commands.ts
     ecs.ts
     container.ts
     java.ts
@@ -535,27 +621,24 @@ src/
     mybatis.ts
     jdbc.ts
     aurora.ts
+    exit-codes.ts
     scenarios.ts
-  world/
-    layout.ts
-    ecs-district.ts
-    container-cutaway.ts
-    java-room.ts
-    spring-line.ts
-    jdbc-route.ts
-    aurora.ts
-  engine/
-    renderer.ts
+  three/
+    create-world-renderer.ts
+    world.ts
     camera.ts
     flows.ts
     picking.ts
     labels.ts
-  ui/
-    hud.ts
-    controls.ts
-    inspector.ts
-    timeline.ts
-    explanations.ts
+    theme.ts
+    districts/
+      ecs.ts
+      container.ts
+      application.ts
+      aurora.ts
+  styles/
+    main.css
+  App.vue
   main.ts
 test/
   lifecycle.test.ts
@@ -564,7 +647,15 @@ test/
   scenario-contracts.test.ts
 ```
 
-`src/sim` はThree.jsやDOMをimportしない。`src/world`、`src/engine`、`src/ui`はシミュレーション状態を変更せず、コマンドをイベントとしてモデルへ渡す。
+`src/sim`はVue、Pinia、Three.js、Tailwind CSS、DOMをimportしない。`src/components`と`src/three`はシミュレーション状態を直接変更せず、Pinia actionを通じてcommandをモデルへ渡す。
+
+Pinia storeはMVPでは3つに絞る。
+
+- `simulation.ts`: ECS、Java、Spring、Batch、JDBC、Auroraの公開snapshotとcommand action
+- `scenario.ts`: scenario、knob、seed、simulation speed
+- `ui.ts`: 選択対象、panel、dialog、camera focus
+
+`CityCanvas.vue`はcanvasのmountとdisposeを管理する。Three.js scene graphの所有権は`create-world-renderer.ts`に置き、Vue componentのunmount時にrenderer、listener、animation frame、GPU resourceを確実に解放する。
 
 ## 18. テスト要件
 
@@ -585,8 +676,14 @@ red/green TDDを必須とする。最初に純粋な状態モデルをテスト�
 - Wrapper再接続とトランザクション再実行を区別すること
 - 同じseedと入力から同じ結果になること
 - UI説明とモデル状態が一致すること
+- Pinia actionが正しいsimulation commandを生成すること
+- Pinia snapshotからVue HUDが正しい状態と終了コードを表示すること
+- Vue componentのunmount時にThree.js rendererとevent listenerが解放されること
+- Tailwind CSSのresponsive layoutで主要操作が隠れないこと
 
 wall clock、実ネットワーク、実AWS、GPUへ依存するテストを状態モデルに持ち込まない。
+
+純粋な状態モデルはVitest、Pinia storeはstore単体テスト、Vue componentはVue Test Utilsで検証する。SFCを含む型検査には`vue-tsc --noEmit`を使用する。3Dの見た目はheadless browserのscreenshotで検証するが、状態遷移の正しさをscreenshotだけで証明しない。
 
 ## 19. 実装フェーズ
 
@@ -594,7 +691,9 @@ wall clock、実ネットワーク、実AWS、GPUへ依存するテストを状�
 
 - 新規リポジトリ名を確定
 - README、LICENSE、AGENTS.md、CLAUDE.mdを作成
-- Vite、TypeScript、Three.js、Vitestを設定
+- Vue 3、Pinia、Tailwind CSS、Vite、TypeScript、Three.js、Vitest、Vue Test Utilsを設定
+- Composition APIと`<script setup lang="ts">`を標準とする
+- `vue-tsc --noEmit`によるSFC型検査を設定
 - GitHub Actionsでtest、typecheck、buildを実行
 - GitHub Pages workflowを設定
 
@@ -610,6 +709,9 @@ wall clock、実ネットワーク、実AWS、GPUへ依存するテストを状�
 
 ### Phase 2: 基本3D世界
 
+- Vue application shell
+- Pinia storeとpure simulationの接続
+- Tailwind CSSによるHUDと操作panel
 - ECS地区
 - RunTask terminal
 - Fargate task launch
@@ -688,3 +790,7 @@ wall clock、実ネットワーク、実AWS、GPUへ依存するテストを状�
 - OOM、SIGKILL、TaskFailedToStartをアプリ異常コード101へ強制変換しない。
 - 実AWS認証情報をブラウザ、リポジトリ、GitHub Actionsへ保存しない。
 - 見た目だけのアニメーションを作り、対応する状態モデルとテストを省略しない。
+- ECSやSpring Batchの状態遷移をVue componentまたはPinia getter内に実装しない。
+- Three.js objectをPiniaのreactive stateへ格納しない。
+- per-frame処理でPiniaの巨大なsnapshotを更新し続けない。
+- Tailwind CSSのclassだけを3Dのsemantic colorのsource of truthにしない。

@@ -8,6 +8,9 @@ Amazon ECSの`RunTask`からFargateコンテナを起動し、Java 21上のSprin
 
 ## Planned stack
 
+- Vue 3
+- Pinia
+- Tailwind CSS
 - TypeScript
 - Three.js
 - Vite
@@ -19,3 +22,5 @@ Amazon ECSの`RunTask`からFargateコンテナを起動し、Java 21上のSprin
 - Aurora PostgreSQL
 
 MVPは静的なブラウザシミュレーターとして実装し、AWS認証情報や実AWS環境を必要としない構成にします。
+
+VueはHUDと操作画面、PiniaはUIとシミュレーションの連携状態、Three.jsは3D描画、Tailwind CSSはDOM UIのスタイルを担当します。ECSやSpring Batchの状態遷移そのものは、フレームワークに依存しない純粋なTypeScriptモデルとして実装します。
