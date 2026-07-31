@@ -5,6 +5,7 @@ const DEFAULT_CONFIG: SimulationConfig = {
   scenario: 'NORMAL',
   statementCount: 10,
   flushThreshold: 10,
+  failAtStatement: 6,
   autoFlush: true,
   taskCpu: 1024,
   taskMemoryMiB: 2048,
@@ -118,6 +119,7 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
   const resolved = { ...DEFAULT_CONFIG, ...config }
   resolved.statementCount = Math.max(1, Math.floor(resolved.statementCount))
   resolved.flushThreshold = Math.max(1, Math.floor(resolved.flushThreshold))
+  resolved.failAtStatement = Math.min(resolved.statementCount, Math.max(1, Math.floor(resolved.failAtStatement)))
   return {
     now: 0,
     runId: 0,
@@ -168,7 +170,7 @@ export function runTask(config: Partial<SimulationConfig> = {}, previous?: Simul
 }
 
 function completeWork(state: SimulationState): void {
-  if (state.config.scenario === 'ABNORMAL') {
+  if (state.config.scenario === 'ABNORMAL' || state.config.scenario === 'FLUSH_FAILURE') {
     state.updateCount = null
     enter(state, 'ROLLBACK')
     return
@@ -209,6 +211,13 @@ function advancePhase(state: SimulationState): void {
       break
     case 'RUN_TASKLET': {
       if (state.executorType === 'SIMPLE') {
+        if (state.config.scenario === 'FLUSH_FAILURE') {
+          state.mapperCalls = state.config.failAtStatement
+          state.sqlExecutions = state.config.failAtStatement
+          event(state, `SQL実行 ${state.config.failAtStatement}件目でSQL例外 · DataAccessException`, 'error')
+          completeWork(state)
+          break
+        }
         state.mapperCalls = state.config.statementCount
         state.sqlExecutions = state.config.statementCount
         completeWork(state)
@@ -223,6 +232,29 @@ function advancePhase(state: SimulationState): void {
     }
     case 'FLUSH_BATCH': {
       const pending = state.pendingStatements
+      const failsHere = state.config.scenario === 'FLUSH_FAILURE'
+        && state.config.failAtStatement > state.flushedStatements
+        && state.config.failAtStatement <= state.flushedStatements + pending
+      if (failsHere) {
+        // pgjdbcはautoCommit=falseのbatch失敗時、全長EXECUTE_FAILED(-3)の
+        // update countsを返す。-3は「未実行」ではなく「成功として保証できない」。
+        state.batchResults.push({
+          flushIndex: state.batchResults.length + 1,
+          mappedStatementId: 'RecordMapper.upsertRecord',
+          sql: 'UPDATE records SET payload = ? WHERE id = ?',
+          parameterCount: pending,
+          updateCounts: Array.from({ length: pending }, () => -3),
+          successfulStatementCount: 0,
+          failedStatementIndex: state.config.failAtStatement - state.flushedStatements,
+        })
+        state.pendingStatements = 0
+        state.sqlExecutions += 1
+        state.updateCount = null
+        event(state, `executeBatch() 失敗 · ${state.config.failAtStatement}件目でBatchUpdateException`, 'error')
+        event(state, 'update countsは全件EXECUTE_FAILED · BatchExecutorException → DataAccessException', 'error')
+        enter(state, 'ROLLBACK')
+        break
+      }
       const perStatementUpdateCount = state.config.scenario === 'WARNING' ? 0 : 1
       state.batchResults.push({
         flushIndex: state.batchResults.length + 1,
@@ -333,5 +365,5 @@ export function runToCompletion(state: SimulationState, step = 0.25): Simulation
 }
 
 export function scenarioLabel(scenario: Scenario): string {
-  return { NORMAL: '正常終了', WARNING: '警告終了', ABNORMAL: '異常終了', LAUNCH_FAILURE: '起動失敗' }[scenario]
+  return { NORMAL: '正常終了', WARNING: '警告終了', ABNORMAL: '異常終了', FLUSH_FAILURE: 'flush失敗', LAUNCH_FAILURE: '起動失敗' }[scenario]
 }

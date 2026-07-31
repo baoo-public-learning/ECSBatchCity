@@ -10,6 +10,7 @@ const scenario = ref<Scenario>('NORMAL')
 const executorType = ref<ExecutorType>('BATCH')
 const statementCount = ref(10)
 const flushThreshold = ref(10)
+const failAtStatement = ref(6)
 const autoFlush = ref(true)
 let timer = 0
 
@@ -30,6 +31,7 @@ function start(): void {
     executorType: executorType.value,
     statementCount: statementCount.value,
     flushThreshold: flushThreshold.value,
+    failAtStatement: failAtStatement.value,
     autoFlush: autoFlush.value,
   })
 }
@@ -43,8 +45,13 @@ function eventDot(event: TimelineEvent): string {
   }[event.kind]
 }
 
-function updateCountTotal(updateCounts: number[]): number {
-  return updateCounts.reduce((total, count) => total + count, 0)
+function updateCountTotal(updateCounts: number[]): string {
+  if (updateCounts.some((count) => count < 0)) return '—(保証なし)'
+  return String(updateCounts.reduce((total, count) => total + count, 0))
+}
+
+function updateCountLabel(count: number): string {
+  return count === -3 ? '×' : String(count)
 }
 
 onMounted(() => {
@@ -97,6 +104,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
               <option value="NORMAL">正常終了 · 0</option>
               <option value="WARNING">警告終了 · 1</option>
               <option value="ABNORMAL">異常終了 · 101</option>
+              <option value="FLUSH_FAILURE">flush失敗 · 101</option>
               <option value="LAUNCH_FAILURE">TaskFailedToStart</option>
             </select>
           </label>
@@ -118,6 +126,11 @@ onBeforeUnmount(() => window.clearInterval(timer))
           <label v-if="executorType === 'BATCH'" class="block text-sm text-slate-300">
             Flush threshold <span class="mono float-right text-sky-300">{{ flushThreshold }}</span>
             <input v-model.number="flushThreshold" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-sky-400 disabled:opacity-50" />
+          </label>
+
+          <label v-if="executorType === 'BATCH' && scenario === 'FLUSH_FAILURE'" class="block text-sm text-slate-300">
+            失敗するstatement位置 <span class="mono float-right text-red-300">{{ Math.min(failAtStatement, statementCount) }}件目</span>
+            <input v-model.number="failAtStatement" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-red-400 disabled:opacity-50" />
           </label>
 
           <label v-if="executorType === 'BATCH'" class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-300">
@@ -213,25 +226,31 @@ onBeforeUnmount(() => window.clearInterval(timer))
           </p>
 
           <ol v-else class="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
-            <li v-for="result in state.batchResults" :key="result.flushIndex" class="min-w-0 rounded-lg border border-slate-700/60 bg-slate-950/50 p-3 text-xs">
+            <li v-for="result in state.batchResults" :key="result.flushIndex" class="min-w-0 rounded-lg border p-3 text-xs" :class="result.failedStatementIndex !== null ? 'border-red-400/40 bg-red-400/5' : 'border-slate-700/60 bg-slate-950/50'">
               <div class="flex items-center justify-between gap-3">
-                <span class="font-semibold text-sky-300">flush #{{ result.flushIndex }}</span>
+                <span class="font-semibold" :class="result.failedStatementIndex !== null ? 'text-red-300' : 'text-sky-300'">flush #{{ result.flushIndex }}</span>
                 <span class="mono shrink-0 text-slate-400">parameters: {{ result.parameterCount }}</span>
               </div>
               <p class="mono mt-2 break-all text-slate-300">{{ result.mappedStatementId }}</p>
               <p class="mono mt-1 break-words text-[10px] leading-4 text-slate-500">{{ result.sql }}</p>
+              <p v-if="result.failedStatementIndex !== null" class="mt-2 font-semibold text-red-300">
+                statement {{ result.failedStatementIndex }}件目でBatchUpdateException
+              </p>
               <div class="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-slate-400">
                 <span>update counts: {{ result.updateCounts.length }}件</span>
                 <span class="mono">合計 {{ updateCountTotal(result.updateCounts) }}</span>
               </div>
               <p v-if="result.updateCounts.length <= 10" class="mono mt-1 break-words text-[10px] text-slate-500">
-                [{{ result.updateCounts.join(', ') }}]
+                [{{ result.updateCounts.map(updateCountLabel).join(', ') }}]
+              </p>
+              <p v-if="result.failedStatementIndex !== null" class="mt-1 text-[10px] leading-4 text-slate-500">
+                × = EXECUTE_FAILED(成功として保証されない)
               </p>
             </li>
           </ol>
 
           <p class="mt-3 border-t border-slate-700/60 pt-3 text-[10px] leading-4 text-slate-500">
-            update countsはflush結果であり、commit前は未確定です。rollbackで取り消せます。
+            update countsはflush結果であり、commit前は未確定です。rollbackで取り消せます。partial update countsはpartial commitを意味しません。
           </p>
         </div>
 

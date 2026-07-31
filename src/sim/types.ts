@@ -12,7 +12,7 @@ export type EcsTaskStatus =
 export type SpringStatus = 'NOT_STARTED' | 'STARTING' | 'READY' | 'CLOSING' | 'CLOSED' | 'FAILED'
 export type BatchStatus = 'UNKNOWN' | 'STARTING' | 'STARTED' | 'STOPPING' | 'STOPPED' | 'COMPLETED' | 'FAILED'
 export type ExecutorType = 'SIMPLE' | 'BATCH'
-export type Scenario = 'NORMAL' | 'WARNING' | 'ABNORMAL' | 'LAUNCH_FAILURE'
+export type Scenario = 'NORMAL' | 'WARNING' | 'ABNORMAL' | 'FLUSH_FAILURE' | 'LAUNCH_FAILURE'
 export type TransactionStatus = 'NONE' | 'ACTIVE' | 'COMMITTED' | 'ROLLED_BACK'
 export type ApplicationResult = 'PENDING' | 'NORMAL' | 'WARNING' | 'ABNORMAL' | 'PLATFORM_FAILURE'
 
@@ -55,6 +55,7 @@ export interface SimulationConfig {
   scenario: Scenario
   statementCount: number
   flushThreshold: number
+  failAtStatement: number
   autoFlush: boolean
   taskCpu: number
   taskMemoryMiB: number

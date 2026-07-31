@@ -160,10 +160,17 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - autoFlush=OFF時はthreshold到達ごとに停止し手動flushを待つ(大きなtickでもゲートを突き抜けない)。
 - rollback後もBatchResultは診断情報として保持し、updateCountはnullのまま(partial commitと表示しない)。
 
+済み(2026-08-01):
+
+- `FLUSH_FAILURE`シナリオ(flush中の`BatchUpdateException`)を既存ABNORMALとは別シナリオとして追加した。
+- `config.failAtStatement`(1-based global index、1..statementCountへ正規化)で失敗位置を設定できる。
+- 失敗flushの`BatchResult`はpgjdbcの実挙動(autoCommit=false時は全長`EXECUTE_FAILED(-3)`)に合わせた: `updateCounts`全件-3、`successfulStatementCount` 0、`failedStatementIndex`はflush内1-based。-3は「未実行」ではなく「成功として保証されない」と説明する。
+- SIMPLE + FLUSH_FAILUREはstatement失敗としてrollback(BatchResultなし)。
+- UI: シナリオ選択、失敗位置スライダー、失敗flushの赤表示、×=EXECUTE_FAILED凡例、「partial update countsはpartial commitを意味しない」注記。
+
 残り:
 
-- `BatchUpdateException`の失敗位置とpartial update countsを実装する。既存ABNORMAL(flush成功後のTasklet例外)とは別シナリオとして追加すること(Codex相談で合意した設計方針)。
-- `EXECUTE_FAILED` / `SUCCESS_NO_INFO`のupdate counts形式の扱い。
+- `SUCCESS_NO_INFO(-2)`のupdate counts形式の扱い(合計に-2を含めない表示)。
 
 ### P1: 終了と障害
 
@@ -226,6 +233,8 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `src/sim/model.ts`: deterministic state machine
 - `test/model.test.ts`: lifecycle、exit code、MyBatis executor test
 - `test/mybatis-flush.test.ts`: flushThreshold、複数flush、BatchResult、手動flushゲートのtest
+- `test/flush-failure.test.ts`: FLUSH_FAILURE、EXECUTE_FAILED配列、失敗位置、partial≠partial commitのtest
+- `test/store.test.ts`: Pinia store経由のreactive proxy回帰test(structuredClone対策)
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector
 - `src/components/CityCanvas.vue`: VueとThree.js rendererのlifecycle接続
@@ -235,7 +244,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 ## 次の推奨タスク
 
-最初のタスクは「公開ページのdesktop/mobile目視QAと、見つかった不具合の修正」にする(BatchResultパネルの表示確認を含む)。その後、`BatchUpdateException`シナリオ(失敗位置、partial update counts、既存ABNORMALとは別シナリオ)をTDDで実装する。
+最初のタスクは「mobile幅の目視QA」にする(この環境ではChromeウィンドウのresizeとDevTools device emulationが拡張の制約で利用できなかったため未実施。実機または別環境で確認すること)。その後はP1「終了と障害」(Aurora接続失敗、writer failover、OOM系)またはP1「Java 21設定」へ進む。
 
 機能追加ごとに次を実行する。
 
