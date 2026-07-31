@@ -114,6 +114,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - hang SIGTERM経路はSIGTERM→hang→stopTimeout待機のtimelineまで公開ページで確認(完走はタブのthrottlingにより未確認、ユニットテストで検証済み)。このQAでFORCE_KILL中の再StopTaskによるイベント重複バグを発見し修正済み。
 - (解消済み 2026-08-01)RUNNING前のStopTask+hangのSIGTERM違和感は、起動前StopTaskを「SIGTERMなしの起動中止」として修正した。
 - 同日、Java 21設定も公開ページで確認: 設定パネル(CPU選択でメモリ選択肢がFargate有効組み合わせに絞られる)、JVM認識CPU 1(固定)表示、1 vCPUでGC=Serial、native予算とJAVA_TOOL_OPTIONS表示、256 CPU/512 MiB/MaxRAM 25%でのメモリ起因OOM(需要136 > 128 MiB→exit 3→回避ヒント→STARTED残留)。
+- 同日、3D内Spriteラベルの表示も公開ページで確認(DOMチップ撤去済み)。軽微: 右端のAURORAラベルが初期カメラ枠で見切れる。camera focus実装時に合わせて調整すること。
 - 未実施: mobile幅QA(Chromeウィンドウのresizeが常に無効、DevTools device emulationも拡張にブロックされたため。実機または別環境で確認すること)。
 - 補足: バックグラウンドタブではChromeのtimer throttlingとdelta cap(0.25s)によりシミュレーション進行が実時間より遅くなる。バグではない。
 
