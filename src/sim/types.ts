@@ -12,8 +12,12 @@ export type EcsTaskStatus =
 export type SpringStatus = 'NOT_STARTED' | 'STARTING' | 'READY' | 'CLOSING' | 'CLOSED' | 'FAILED'
 export type BatchStatus = 'UNKNOWN' | 'STARTING' | 'STARTED' | 'STOPPING' | 'STOPPED' | 'COMPLETED' | 'FAILED'
 export type ExecutorType = 'SIMPLE' | 'BATCH'
-export type Scenario = 'NORMAL' | 'WARNING' | 'ABNORMAL' | 'FLUSH_FAILURE' | 'LAUNCH_FAILURE'
-export type TransactionStatus = 'NONE' | 'ACTIVE' | 'COMMITTED' | 'ROLLED_BACK'
+export type Scenario = 'NORMAL' | 'WARNING' | 'ABNORMAL' | 'FLUSH_FAILURE' | 'DB_CONNECT_FAILURE' | 'WRITER_FAILOVER' | 'LAUNCH_FAILURE'
+// LOST: 接続喪失によりアプリからtransactionの結果が確認できない状態
+// (TransactionStateUnknownSQLException / SQLState 08007)。
+export type TransactionStatus = 'NONE' | 'ACTIVE' | 'COMMITTED' | 'ROLLED_BACK' | 'LOST'
+
+export type FailoverState = 'NONE' | 'DETECTING' | 'REFRESHING_TOPOLOGY' | 'RECONNECTED'
 export type ApplicationResult = 'PENDING' | 'NORMAL' | 'WARNING' | 'ABNORMAL' | 'PLATFORM_FAILURE'
 
 export type Phase =
@@ -26,6 +30,9 @@ export type Phase =
   | 'START_JOB'
   | 'RUN_TASKLET'
   | 'FLUSH_BATCH'
+  | 'FAILOVER_DETECT'
+  | 'TOPOLOGY_REFRESH'
+  | 'RECONNECT'
   | 'COMMIT'
   | 'ROLLBACK'
   | 'CLOSE_SPRING'
@@ -76,6 +83,8 @@ export interface SimulationState {
   batchExitStatus: 'UNKNOWN' | 'COMPLETED' | 'WARNING' | 'FAILED'
   taskletRepeatStatus: 'NONE' | 'FINISHED'
   transaction: TransactionStatus
+  writerHost: string
+  failoverState: FailoverState
   executorType: ExecutorType
   mapperCalls: number
   pendingStatements: number

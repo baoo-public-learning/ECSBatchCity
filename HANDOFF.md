@@ -175,11 +175,16 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 ### P1: 終了と障害
 
-- Aurora接続失敗
-- SQL例外の詳細
-- writer failoverの状態遷移
-- wrapper topology refresh
-- 再接続後にJobを失敗させる場合と再試行する場合
+済み(2026-08-01):
+
+- `DB_CONNECT_FAILURE`シナリオ: Step transaction開始時の接続取得失敗(`CannotGetJdbcConnectionException` → `CannotCreateTransactionException`)。Tasklet未実行、transactionはNONEのまま、Job FAILED → 101。
+- `WRITER_FAILOVER`シナリオ: `failAtStatement`を含むflush(SIMPLEはSQL実行)中にwriter障害 → `FAILOVER_DETECT` → `TOPOLOGY_REFRESH` → `RECONNECT`のphase遷移でwriter-2へ再接続。transactionは`LOST`(`TransactionStateUnknownSQLException` / SQLState 08007。08S02はtransaction外の別物なので使わない — Codex調査)。再接続≠再実行としてJob FAILED → 101。中断flushはBatchResultを生成しない(本モデル上の定義)。
+- 状態追加: `writerHost`、`failoverState`、`TransactionStatus 'LOST'`。UIにWriter host / Failover表示と「RECONNECTEDは接続状態でありtransaction再実行を意味しない」注記。
+
+残り:
+
+- 再接続後にTaskletを再試行するpolicy(`RETRY_TASKLET`)。attempt管理(旧attemptのBatchResultをupdateCount合計から除外する仕組み)が必要。
+- SQL例外の詳細表示
 - JVM `OutOfMemoryError`
 - `-XX:+ExitOnOutOfMemoryError`
 - ECS memory limitによる停止
@@ -235,6 +240,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `test/model.test.ts`: lifecycle、exit code、MyBatis executor test
 - `test/mybatis-flush.test.ts`: flushThreshold、複数flush、BatchResult、手動flushゲートのtest
 - `test/flush-failure.test.ts`: FLUSH_FAILURE、EXECUTE_FAILED配列、失敗位置、partial≠partial commitのtest
+- `test/aurora-failure.test.ts`: DB_CONNECT_FAILURE、writer failover、transaction LOST、再接続≠再実行のtest
 - `test/store.test.ts`: Pinia store経由のreactive proxy回帰test(structuredClone対策)
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector

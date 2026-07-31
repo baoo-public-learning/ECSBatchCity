@@ -105,6 +105,8 @@ onBeforeUnmount(() => window.clearInterval(timer))
               <option value="WARNING">警告終了 · 1</option>
               <option value="ABNORMAL">異常終了 · 101</option>
               <option value="FLUSH_FAILURE">flush失敗 · 101</option>
+              <option value="DB_CONNECT_FAILURE">DB接続失敗 · 101</option>
+              <option value="WRITER_FAILOVER">writer failover · 101</option>
               <option value="LAUNCH_FAILURE">TaskFailedToStart</option>
             </select>
           </label>
@@ -128,8 +130,8 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <input v-model.number="flushThreshold" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-sky-400 disabled:opacity-50" />
           </label>
 
-          <label v-if="executorType === 'BATCH' && scenario === 'FLUSH_FAILURE'" class="block text-sm text-slate-300">
-            失敗するstatement位置 <span class="mono float-right text-red-300">{{ Math.min(failAtStatement, statementCount) }}件目</span>
+          <label v-if="scenario === 'FLUSH_FAILURE' || scenario === 'WRITER_FAILOVER'" class="block text-sm text-slate-300">
+            障害発生statement位置 <span class="mono float-right text-red-300">{{ Math.min(failAtStatement, statementCount) }}件目</span>
             <input v-model.number="failAtStatement" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-red-400 disabled:opacity-50" />
           </label>
 
@@ -215,7 +217,12 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <dt class="text-slate-500">Task memory</dt><dd class="mono text-right">{{ state.java.taskMemoryMiB }} MiB</dd>
             <dt class="text-slate-500">MaxRAMPercentage</dt><dd class="mono text-right">{{ state.java.maxRamPercentage }}%</dd>
             <dt class="text-slate-500">JDBC stack</dt><dd class="text-right">AWS Wrapper → pgJDBC</dd>
+            <dt class="text-slate-500">Writer host</dt><dd class="mono text-right">{{ state.writerHost }}</dd>
+            <dt class="text-slate-500">Failover</dt><dd class="mono text-right" :class="state.failoverState === 'NONE' ? '' : 'text-amber-300'">{{ state.failoverState }}</dd>
           </dl>
+          <p v-if="state.failoverState === 'RECONNECTED'" class="mt-2 text-[10px] leading-4 text-slate-500">
+            RECONNECTEDは接続状態です。中断されたtransactionの再実行を意味しません。
+          </p>
         </div>
 
         <div v-if="state.executorType === 'BATCH'" class="mt-5 rounded-xl border border-slate-700/60 bg-slate-950/50 p-3">

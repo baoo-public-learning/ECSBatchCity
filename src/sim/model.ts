@@ -22,6 +22,9 @@ const PHASE_DURATION: Record<Phase, number> = {
   START_JOB: 0.55,
   RUN_TASKLET: 1.8,
   FLUSH_BATCH: 0.9,
+  FAILOVER_DETECT: 0.8,
+  TOPOLOGY_REFRESH: 0.9,
+  RECONNECT: 0.7,
   COMMIT: 0.65,
   ROLLBACK: 0.65,
   CLOSE_SPRING: 0.7,
@@ -71,6 +74,17 @@ function enter(state: SimulationState, phase: Phase): void {
       } else {
         event(state, `Tasklet再開 · 残りMapper呼び出し ${state.config.statementCount - state.mapperCalls}件`)
       }
+      break
+    case 'FAILOVER_DETECT':
+      state.failoverState = 'DETECTING'
+      event(state, 'Wrapper failover plugin(v2)が接続障害を検出', 'warning')
+      break
+    case 'TOPOLOGY_REFRESH':
+      state.failoverState = 'REFRESHING_TOPOLOGY'
+      event(state, 'Aurora topologyを更新 · new writerを特定', 'warning')
+      break
+    case 'RECONNECT':
+      event(state, 'aurora-writer-2へ再接続を試行', 'warning')
       break
     case 'FLUSH_BATCH':
       state.flushRequested = state.config.autoFlush
@@ -134,6 +148,8 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
     batchExitStatus: 'UNKNOWN',
     taskletRepeatStatus: 'NONE',
     transaction: 'NONE',
+    writerHost: 'aurora-writer-1',
+    failoverState: 'NONE',
     executorType: resolved.executorType,
     mapperCalls: 0,
     pendingStatements: 0,
@@ -207,6 +223,18 @@ function advancePhase(state: SimulationState): void {
       enter(state, 'START_JOB')
       break
     case 'START_JOB':
+      if (state.config.scenario === 'DB_CONNECT_FAILURE') {
+        state.batchStatus = 'FAILED'
+        state.batchExitStatus = 'FAILED'
+        state.applicationResult = 'ABNORMAL'
+        state.applicationExitCode = 101
+        state.springStatus = 'FAILED'
+        state.updateCount = null
+        event(state, 'Step transaction開始時に接続を取得できない · CannotGetJdbcConnectionException', 'error')
+        event(state, 'CannotCreateTransactionException · Taskletは未実行のままJob FAILED', 'error')
+        enter(state, 'CLOSE_SPRING')
+        break
+      }
       enter(state, 'RUN_TASKLET')
       break
     case 'RUN_TASKLET': {
@@ -216,6 +244,14 @@ function advancePhase(state: SimulationState): void {
           state.sqlExecutions = state.config.failAtStatement
           event(state, `SQL実行 ${state.config.failAtStatement}件目でSQL例外 · DataAccessException`, 'error')
           completeWork(state)
+          break
+        }
+        if (state.config.scenario === 'WRITER_FAILOVER') {
+          state.mapperCalls = state.config.failAtStatement
+          state.sqlExecutions = state.config.failAtStatement
+          state.transaction = 'LOST'
+          event(state, `SQL実行 ${state.config.failAtStatement}件目でwriter障害 · 接続を喪失`, 'error')
+          enter(state, 'FAILOVER_DETECT')
           break
         }
         state.mapperCalls = state.config.statementCount
@@ -232,6 +268,18 @@ function advancePhase(state: SimulationState): void {
     }
     case 'FLUSH_BATCH': {
       const pending = state.pendingStatements
+      const failoverHere = state.config.scenario === 'WRITER_FAILOVER'
+        && state.config.failAtStatement > state.flushedStatements
+        && state.config.failAtStatement <= state.flushedStatements + pending
+      if (failoverHere) {
+        // 接続喪失なのでdriverからBatchResultは返らない(本モデル上の定義)。
+        state.pendingStatements = 0
+        state.sqlExecutions += 1
+        state.transaction = 'LOST'
+        event(state, 'executeBatch()中にwriter障害 · 接続を喪失', 'error')
+        enter(state, 'FAILOVER_DETECT')
+        break
+      }
       const failsHere = state.config.scenario === 'FLUSH_FAILURE'
         && state.config.failAtStatement > state.flushedStatements
         && state.config.failAtStatement <= state.flushedStatements + pending
@@ -301,6 +349,25 @@ function advancePhase(state: SimulationState): void {
       event(state, 'ROLLBACK完了 · Job FAILED', 'error')
       enter(state, 'CLOSE_SPRING')
       break
+    case 'FAILOVER_DETECT':
+      enter(state, 'TOPOLOGY_REFRESH')
+      break
+    case 'TOPOLOGY_REFRESH':
+      enter(state, 'RECONNECT')
+      break
+    case 'RECONNECT':
+      state.writerHost = 'aurora-writer-2'
+      state.failoverState = 'RECONNECTED'
+      state.batchStatus = 'FAILED'
+      state.batchExitStatus = 'FAILED'
+      state.applicationResult = 'ABNORMAL'
+      state.applicationExitCode = 101
+      state.springStatus = 'FAILED'
+      state.updateCount = null
+      event(state, 'new writerへ再接続 · TransactionStateUnknownSQLException(08007)', 'error')
+      event(state, '再接続はtransactionの再実行ではない · 中断transactionの結果は不明のままJob FAILED', 'error')
+      enter(state, 'CLOSE_SPRING')
+      break
     case 'CLOSE_SPRING':
       enter(state, 'STOP_CONTAINER')
       break
@@ -365,5 +432,5 @@ export function runToCompletion(state: SimulationState, step = 0.25): Simulation
 }
 
 export function scenarioLabel(scenario: Scenario): string {
-  return { NORMAL: '正常終了', WARNING: '警告終了', ABNORMAL: '異常終了', FLUSH_FAILURE: 'flush失敗', LAUNCH_FAILURE: '起動失敗' }[scenario]
+  return { NORMAL: '正常終了', WARNING: '警告終了', ABNORMAL: '異常終了', FLUSH_FAILURE: 'flush失敗', DB_CONNECT_FAILURE: 'DB接続失敗', WRITER_FAILOVER: 'writer failover', LAUNCH_FAILURE: '起動失敗' }[scenario]
 }
