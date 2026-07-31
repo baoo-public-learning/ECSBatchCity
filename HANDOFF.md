@@ -220,24 +220,31 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 ### P2: 3D表現
 
+済み(2026-08-01):
+
+- 6地区の3D内ラベル(CanvasTexture + Sprite。CSS2DRenderer不使用で既存WebGLRenderer内に完結、Codex相談で選定)。DOMオーバーレイの重複ラベルは撤去。
+- `prefers-reduced-motion`対応: CityCanvasがmatchMediaを購読し`world.setReducedMotion()`へ伝搬。装飾的な揺れとpulse移動を停止、状態由来の色・emissive切替とsimulation進行は維持。
+- GPU resource disposeの自動テスト: `createWorldRenderer`へWebGLRendererとframe loopを注入可能にし、fake renderer + three実物のScene構築でgeometry/material/CanvasTexture/renderer/cancelFrameのdisposeを検証。Spriteの共有geometryはdisposeしない。
+
+残り:
+
 - 現在の抽象boxを、ECS、container、Spring、MyBatis、JDBC、Auroraの意味が分かる建築へ発展させる。
-- 3D内の各地区へラベルを付ける。
 - hover / click pickingを実装する。
 - 選択対象とInspectorを接続する。
 - camera focusとresetを実装する。
 - ENI作成、image pull、JVM起動、SQL、flush、commit、rollbackを別のflowとして表現する。
-- reduced motionへ対応する。
-- GPU resource disposeの自動テストを追加する。
 
 ### P2: Vue / Piniaテスト
 
-- Pinia action test
-- `RunTask` control component test
-- exit code panel test
-- warning `1`を非ゼロとして表示するtest
-- manual flush button test
-- component unmount時のrenderer / listener cleanup test
-- accessibility test
+済み(2026-08-01):
+
+- Pinia action test(`test/store.test.ts`、structuredClone回帰含む)
+- component test(`test/app-ui.test.ts`、@vue/test-utils + happy-dom): RunTask/シナリオselectのactive中disable、warning `1`の非ゼロ表示、manual flushボタンの出現と消滅、unmount時のinterval解除、ボタンの可読ラベル
+- renderer cleanup test(`test/world-renderer.test.ts`)
+
+残り:
+
+- スクリーンリーダー観点のaccessibility test(aria属性の検証など)
 
 ### P2: 配信と保守
 
@@ -265,6 +272,8 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `test/failover-retry.test.ts`: RETRY_TASKLET、attempt管理、旧attempt除外のtest
 - `test/stop-metadata.test.ts`: UserInitiated、起動前StopTaskの起動中止のtest
 - `test/java-container.test.ts`: heap/CPU/GC導出、JAVA_TOOL_OPTIONS、native予算、メモリ設定起因OOMのtest
+- `test/app-ui.test.ts`: App.vueのcomponent test(happy-dom)
+- `test/world-renderer.test.ts`: Three.js rendererのdispose / reduced motion test
 - `test/store.test.ts`: Pinia store経由のreactive proxy回帰test(structuredClone対策)
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector

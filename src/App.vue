@@ -235,9 +235,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <section class="order-1 min-h-[430px] overflow-hidden rounded-2xl border border-sky-900/50 bg-slate-950/50 lg:order-2 lg:min-h-[680px]">
         <div class="relative h-full min-h-[430px] lg:min-h-[680px]">
           <CityCanvas />
-          <div class="pointer-events-none absolute inset-x-4 top-4 flex flex-wrap gap-2">
-            <span v-for="label in ['ECS', 'CONTAINER', 'SPRING', 'MYBATIS', 'JDBC', 'AURORA']" :key="label" class="rounded border border-sky-700/40 bg-slate-950/75 px-2 py-1 text-[10px] font-bold tracking-[0.14em] text-sky-200">{{ label }}</span>
-          </div>
+          <p class="sr-only">3Dシーンのレイヤー: ECS、CONTAINER、SPRING、MYBATIS、JDBC、AURORA。現在の状態は下部のステータスタイルとExecution inspectorに表示されます。</p>
           <div class="absolute bottom-4 left-4 right-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
             <div v-for="item in [
               ['ECS', state.ecsStatus],

@@ -12,7 +12,12 @@ onMounted(() => {
   const world = createWorldRenderer(canvas.value)
   world.update(store.snapshot)
   const stopWatch = watch(() => store.snapshot, (snapshot) => world.update(snapshot), { deep: false })
+  const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+  world.setReducedMotion(media.matches)
+  const onMotionPreferenceChange = (event: MediaQueryListEvent): void => world.setReducedMotion(event.matches)
+  media.addEventListener('change', onMotionPreferenceChange)
   dispose = () => {
+    media.removeEventListener('change', onMotionPreferenceChange)
     stopWatch()
     world.dispose()
   }
