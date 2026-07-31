@@ -371,6 +371,106 @@ Tasklet
 
 MyBatis-Springの `SqlSessionTemplate` をSpringトランザクションに参加させる。TaskletまたはMapperが `SqlSession.commit()`、`rollback()`、`close()` を直接呼ぶ構成として説明しない。
 
+### ExecutorType
+
+MVPではMyBatisの次の2種類の `ExecutorType` を切り替えて比較できるようにする。
+
+```ts
+type MyBatisExecutorType = 'SIMPLE' | 'BATCH'
+```
+
+`SIMPLE`では、Mapperのupdate、insert、delete呼び出しごとにJDBC statementを実行する。SQLが実行されたことと、Springトランザクションがcommitされたことを同一視しない。
+
+```text
+Mapper.insert(A)
+  -> JDBC statement execution
+  -> Aurora execution
+  -> update count
+Mapper.insert(B)
+  -> JDBC statement execution
+  -> Aurora execution
+  -> update count
+Spring transaction commit
+```
+
+`BATCH`では、Mapper呼び出しをMyBatis / JDBC batchへ蓄積し、flush時にまとめて実行する。
+
+```text
+Mapper.insert(A) -> pending batch
+Mapper.insert(B) -> pending batch
+Mapper.insert(C) -> pending batch
+flushStatements()
+  -> JDBC executeBatch()
+  -> Aurora execution
+  -> List<BatchResult>
+Spring transaction commit
+```
+
+同じSpringトランザクション内で異なる `ExecutorType` を混在させない。切り替える場合はTasklet実行前に選択し、そのTaskletのトランザクション中は固定する。異なるExecutorTypeを同一処理で使う発展シナリオは、別トランザクションまたは `REQUIRES_NEW` の責務を説明できる段階まで実装しない。
+
+### flushStatements
+
+`flushStatements()`はpending batch statementをJDBC Driverへ実行させ、`List<BatchResult>`を返す操作としてモデル化する。flushとcommitは別操作である。
+
+```text
+flush = pending SQLをJDBC Driver経由でDBへ実行する
+commit = 現在のDB transactionを確定する
+```
+
+flush後、commit前の状態を必ず表現する。
+
+```text
+pending statements: 0
+flushed statements: 100
+database execution: complete
+transaction: ACTIVE
+commit status: NOT COMMITTED
+```
+
+この状態ではrollbackが可能である。flush済みでも未commitの更新は、rollbackによって確定しない。
+
+`BATCH`でSpring transactionがcommitされる場合、未flushのstatementがあればcommit処理の一部としてflushされる動作も表現する。明示的なflushボタンを押さなくても、commitがpending batchを残したまま完了するとは説明しない。
+
+rollback時は次を区別する。
+
+- flush前: pending batchを破棄し、DBでは未実行。
+- flush後、commit前: DBで実行済みの変更をtransaction rollbackで取り消す。
+- commit後: 同じtransactionのrollbackでは取り消せない。
+
+`SIMPLE`に対する `flushStatements()`は、実行待ちbatchがない状態として表示する。SIMPLEのSQL実行ボタンとして扱わない。
+
+### BatchResultと更新件数
+
+`BATCH`では個々のMapper呼び出し時点で最終的な更新件数が確定したと説明しない。flush後に返る `BatchResult` から次を表示する。
+
+- mapped statement ID
+- SQL
+- parameter object count
+- update counts
+- successful statement count
+- failed statement index
+
+更新件数による警告判定は、BATCHの場合はflush結果を取得した後に行う。
+
+### flush失敗
+
+flush中の `BatchUpdateException` を次の順で表現する。
+
+```text
+pending batch
+  -> flushStatements()
+  -> JDBC executeBatch()
+  -> partial update counts / failure
+  -> MyBatis BatchExecutorException
+  -> Spring DataAccessException
+  -> transaction rollback
+  -> Step FAILED
+  -> Job FAILED
+  -> application exit code 101
+```
+
+一部statementがDBで実行された可能性と、transactionがcommitされたことを同一視しない。rollbackが成功した場合、実行済みの変更も確定しない。どのstatementまで成功したかはupdate countsとして表示し、部分commitしたとは表示しない。
+
 正常時:
 
 ```text
@@ -495,6 +595,13 @@ Aurora固有の仕組みと通常のPostgreSQLの仕組みを混同しない。�
 - Tasklet実行時間
 - SQL実行時間
 - HikariCP maximumPoolSize
+- MyBatis `ExecutorType.SIMPLE` / `ExecutorType.BATCH`
+- pending statement件数
+- flush threshold
+- 手動 `flushStatements()`
+- commit時の自動flush
+- flush後にcommit / rollback
+- flush failure位置
 - Aurora最大接続数
 - `InitialRAMPercentage`
 - `MaxRAMPercentage`
@@ -584,6 +691,75 @@ SQL実行中にwriter障害
   -> アプリ方針に従って失敗または再試行
 ```
 
+### SIMPLE実行
+
+```text
+ExecutorType.SIMPLE
+  -> Mapperを10回呼び出す
+  -> SQLを10回実行
+  -> update countを各呼び出しで取得
+  -> commit
+```
+
+### BATCH明示flush
+
+```text
+ExecutorType.BATCH
+  -> Mapperを10回呼び出す
+  -> pending statements 10
+  -> flushStatements()
+  -> BatchResult / update counts
+  -> transaction ACTIVE
+  -> commit
+```
+
+### BATCH commit時flush
+
+```text
+ExecutorType.BATCH
+  -> Mapperを10回呼び出す
+  -> 明示flushなし
+  -> Spring transaction commit
+  -> pending batchをflush
+  -> commit
+```
+
+### flush後rollback
+
+```text
+ExecutorType.BATCH
+  -> pending statements
+  -> flushStatements()
+  -> Auroraで実行済み、未commit
+  -> Tasklet例外
+  -> rollback
+  -> Job FAILED
+  -> exit code 101
+```
+
+### flush結果による警告
+
+```text
+ExecutorType.BATCH
+  -> flushStatements()
+  -> update count合計 0
+  -> commit
+  -> BatchStatus COMPLETED
+  -> ExitStatus WARNING
+  -> exit code 1
+```
+
+### flush失敗
+
+```text
+ExecutorType.BATCH
+  -> statement NでBatchUpdateException
+  -> successful update countsを表示
+  -> rollback
+  -> BatchStatus FAILED
+  -> exit code 101
+```
+
 ## 17. 推奨ソース構成
 
 ```text
@@ -619,6 +795,7 @@ src/
     spring.ts
     batch.ts
     mybatis.ts
+    mybatis-executor.ts
     jdbc.ts
     aurora.ts
     exit-codes.ts
@@ -644,6 +821,8 @@ test/
   lifecycle.test.ts
   exit-code-propagation.test.ts
   transaction.test.ts
+  mybatis-executor.test.ts
+  mybatis-flush.test.ts
   scenario-contracts.test.ts
 ```
 
@@ -672,6 +851,16 @@ red/green TDDを必須とする。最初に純粋な状態モデルをテスト�
 - exit code 1がECS視点では非ゼロであること
 - OOMやSIGKILLを強制的に101へ変換しないこと
 - MyBatis処理がSpringトランザクションへ参加すること
+- SIMPLEではMapper呼び出しごとにSQLが実行されること
+- BATCHではMapper呼び出しがflushまでpendingになること
+- BATCHの更新件数がflush結果から確定すること
+- flushとcommitが別状態であること
+- flush後、commit前にrollbackできること
+- commit時に未flushのbatchが実行されること
+- flush前rollbackがpending batchを破棄すること
+- SIMPLEのflushをSQL実行として扱わないこと
+- flush失敗時のpartial update countsを部分commitと表示しないこと
+- 同じSpringトランザクション内でExecutorTypeを混在させないこと
 - SQL例外時にrollbackされること
 - Wrapper再接続とトランザクション再実行を区別すること
 - 同じseedと入力から同じ結果になること
@@ -724,7 +913,9 @@ wall clock、実ネットワーク、実AWS、GPUへ依存するテストを状�
 - Java 21 room
 - Spring Boot context
 - Tasklet
-- MyBatis
+- MyBatis Mapper / SqlSessionTemplate
+- ExecutorType SIMPLE / BATCH
+- pending batch / flushStatements / BatchResult
 - HikariCP
 - Advanced JDBC Wrapper
 - PostgreSQL Driver
@@ -775,6 +966,8 @@ wall clock、実ネットワーク、実AWS、GPUへ依存するテストを状�
 - Spring Batch ExitStatus: <https://docs.spring.io/spring-batch/reference/api/org/springframework/batch/core/ExitStatus.html>
 - MyBatis-Spring transactions: <https://mybatis.org/spring/transactions.html>
 - MyBatis-Spring SqlSessionTemplate: <https://mybatis.org/spring/sqlsession.html>
+- MyBatis Java API and batch flush: <https://mybatis.org/mybatis-3/java-api.html>
+- MyBatis BatchResult: <https://mybatis.org/mybatis-3/apidocs/org/apache/ibatis/executor/BatchResult.html>
 - AWS Advanced JDBC Wrapper: <https://github.com/aws/aws-advanced-jdbc-wrapper>
 - Java 21 command options: <https://docs.oracle.com/en/java/javase/21/docs/specs/man/java.html>
 
@@ -784,6 +977,11 @@ wall clock、実ネットワーク、実AWS、GPUへ依存するテストを状�
 - Tasklet `FINISHED` をプロセス終了コード0として直結しない。
 - Spring Batch `ExitStatus` とOS終了コードを同じ型にしない。
 - MyBatis Mapperが独自にcommitまたはrollbackすると説明しない。
+- `flushStatements()`をcommitとして説明しない。
+- BATCHのMapper呼び出し時点で最終更新件数が確定したと説明しない。
+- flush済み、commit前の更新を確定済みとして表示しない。
+- BatchUpdateExceptionのpartial update countsを部分commitとして表示しない。
+- 同じSpringトランザクション内でSIMPLEとBATCHを無条件に混在させない。
 - AWS Advanced JDBC WrapperをPostgreSQL JDBC Driverそのものとして扱わない。
 - failover後に失敗トランザクションが必ず自動再実行されると説明しない。
 - exit code 1をECSが警告として理解すると説明しない。
