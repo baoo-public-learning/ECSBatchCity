@@ -33,6 +33,26 @@ const maxRamPercentage = ref(70)
 let timer = 0
 
 const state = computed(() => store.snapshot)
+const cityCanvas = ref<InstanceType<typeof CityCanvas> | null>(null)
+const selectedDistrict = ref<string | null>(null)
+
+const districtInfo: Record<string, string> = {
+  ECS: 'RunTaskを受け付けるcontrol plane。desiredStatusと実状態(lastStatus)を別々に管理し、停止理由はstopCode / stoppedReasonとして残ります。',
+  CONTAINER: 'Fargate上のcontainer。JVM processの終了コードがcontainer exit codeとしてECSへ伝わります。',
+  SPRING: 'Spring Boot ApplicationContextとSpring Batch Job / TaskletStep。BatchStatusとExitStatusは別物です。',
+  MYBATIS: 'MapperをSQLへ変換するレイヤー。ExecutorType.BATCHではflushStatements()までpending batchに蓄積されます。',
+  JDBC: 'HikariCP → AWS Advanced JDBC Wrapper → pgJDBC。writer failoverの検出とtopology更新を担いますが、transactionの再実行はしません。',
+  AURORA: 'Aurora PostgreSQL writer。flush済みでもcommit前の変更はrollbackで取り消せます。',
+}
+
+function onDistrictSelect(district: string | null): void {
+  selectedDistrict.value = district
+}
+
+function resetView(): void {
+  selectedDistrict.value = null
+  cityCanvas.value?.resetView()
+}
 const resultTone = computed(() => ({
   NORMAL: 'text-emerald-300 border-emerald-400/40 bg-emerald-400/10',
   WARNING: 'text-amber-300 border-amber-400/40 bg-amber-400/10',
@@ -234,8 +254,16 @@ onBeforeUnmount(() => window.clearInterval(timer))
 
       <section class="order-1 min-h-[430px] overflow-hidden rounded-2xl border border-sky-900/50 bg-slate-950/50 lg:order-2 lg:min-h-[680px]">
         <div class="relative h-full min-h-[430px] lg:min-h-[680px]">
-          <CityCanvas />
+          <CityCanvas ref="cityCanvas" @select="onDistrictSelect" />
           <p class="sr-only">3Dシーンのレイヤー: ECS、CONTAINER、SPRING、MYBATIS、JDBC、AURORA。現在の状態は下部のステータスタイルとExecution inspectorに表示されます。</p>
+          <div v-if="selectedDistrict" class="absolute left-4 top-4 max-w-xs rounded-xl border border-sky-700/50 bg-slate-950/85 p-3 text-xs backdrop-blur">
+            <div class="flex items-center justify-between gap-3">
+              <span class="font-bold tracking-[0.14em] text-sky-200">{{ selectedDistrict }}</span>
+              <button class="rounded border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300 transition hover:bg-slate-800" @click="resetView">視点リセット</button>
+            </div>
+            <p class="mt-1.5 leading-5 text-slate-300">{{ districtInfo[selectedDistrict] }}</p>
+          </div>
+          <p v-else class="pointer-events-none absolute left-4 top-4 rounded bg-slate-950/60 px-2 py-1 text-[10px] text-slate-500">建物をクリックすると説明と視点が切り替わります</p>
           <div class="absolute bottom-4 left-4 right-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
             <div v-for="item in [
               ['ECS', state.ecsStatus],

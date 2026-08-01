@@ -18,7 +18,10 @@ function createFakeRenderer() {
 function mountWorld() {
   const fakeRenderer = createFakeRenderer()
   const cancelFrame = vi.fn()
-  const world = createWorldRenderer(document.createElement('canvas'), {
+  const canvas = document.createElement('canvas')
+  Object.defineProperty(canvas, 'clientWidth', { value: 800 })
+  Object.defineProperty(canvas, 'clientHeight', { value: 500 })
+  const world = createWorldRenderer(canvas, {
     createRenderer: () => fakeRenderer,
     requestFrame: () => 1,
     cancelFrame,
@@ -49,6 +52,38 @@ describe('world renderer resources', () => {
     const { world } = mountWorld()
     expect(() => world.setReducedMotion(true)).not.toThrow()
     expect(() => world.setReducedMotion(false)).not.toThrow()
+    world.dispose()
+  })
+})
+
+describe('district picking and camera', () => {
+  it('can pick every district somewhere in the default view', () => {
+    const { world } = mountWorld()
+    const picked = new Set<string>()
+    for (let x = -0.98; x <= 0.98; x += 0.04) {
+      for (let y = -0.9; y <= 0.9; y += 0.06) {
+        const district = world.pickAt(x, y)
+        if (district) picked.add(district)
+      }
+    }
+    for (const label of ['ECS', 'CONTAINER', 'SPRING', 'MYBATIS', 'JDBC', 'AURORA']) {
+      expect(picked.has(label), `expected ${label} to be pickable`).toBe(true)
+    }
+    world.dispose()
+  })
+
+  it('returns null when picking empty sky', () => {
+    const { world } = mountWorld()
+    expect(world.pickAt(0, 0.98)).toBeNull()
+    world.dispose()
+  })
+
+  it('exposes selection highlight and camera focus without throwing', () => {
+    const { world } = mountWorld()
+    expect(() => world.setSelected('AURORA')).not.toThrow()
+    expect(() => world.focusDistrict('AURORA')).not.toThrow()
+    expect(() => world.setSelected(null)).not.toThrow()
+    expect(() => world.focusDistrict(null)).not.toThrow()
     world.dispose()
   })
 })

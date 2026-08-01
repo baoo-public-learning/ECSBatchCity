@@ -4,11 +4,14 @@ import type { SimulationState } from '../sim/types'
 interface WorldRenderer {
   update(snapshot: SimulationState): void
   setReducedMotion(value: boolean): void
+  setSelected(district: string | null): void
+  focusDistrict(district: string | null): void
+  pickAt(ndcX: number, ndcY: number): string | null
   dispose(): void
 }
 
-// WebGLコンテキストを持たないテスト環境でも組み立てとdisposeを検証できる
-// よう、WebGLRendererとframe loopは注入可能にする。
+// WebGLコンテキストを持たないテスト環境でも組み立て・picking・disposeを
+// 検証できるよう、WebGLRendererとframe loopは注入可能にする。
 export interface MinimalRenderer {
   setPixelRatio(value: number): void
   setSize(width: number, height: number, updateStyle?: boolean): void
@@ -24,6 +27,9 @@ export interface WorldRendererOptions {
   cancelFrame?: (handle: number) => void
 }
 
+export const DISTRICT_LABELS = ['ECS', 'CONTAINER', 'SPRING', 'MYBATIS', 'JDBC', 'AURORA'] as const
+export type DistrictLabel = (typeof DISTRICT_LABELS)[number]
+
 const statusColor = (state: SimulationState): number => {
   if (state.applicationResult === 'ABNORMAL') return 0xef4444
   if (state.applicationResult === 'WARNING') return 0xf59e0b
@@ -31,6 +37,9 @@ const statusColor = (state: SimulationState): number => {
   if (state.applicationResult === 'PLATFORM_FAILURE') return 0xa855f7
   return 0x38bdf8
 }
+
+const DEFAULT_CAMERA_POSITION = new THREE.Vector3(14, 14, 30)
+const DEFAULT_CAMERA_TARGET = new THREE.Vector3(0, 1.5, 0)
 
 function createLabelSprite(text: string): THREE.Sprite {
   const canvas = document.createElement('canvas')
@@ -57,6 +66,78 @@ function createLabelSprite(text: string): THREE.Sprite {
   return sprite
 }
 
+interface District {
+  label: DistrictLabel
+  group: THREE.Group
+  materials: THREE.MeshStandardMaterial[]
+  center: THREE.Vector3
+  topY: number
+}
+
+// 各地区を意味の分かる建築(複合プリミティブ)として組み立てる。
+function buildDistrict(label: DistrictLabel, index: number, baseMaterial: THREE.MeshStandardMaterial): District {
+  const group = new THREE.Group()
+  const materials: THREE.MeshStandardMaterial[] = []
+  const add = (geometry: THREE.BufferGeometry, y: number, x = 0, z = 0, rotation?: THREE.Euler): void => {
+    const material = baseMaterial.clone()
+    materials.push(material)
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.position.set(x, y, z)
+    if (rotation) mesh.rotation.copy(rotation)
+    mesh.userData.district = label
+    group.add(mesh)
+  }
+
+  let topY = 0
+  switch (label) {
+    case 'ECS':
+      // control plane tower + アンテナ皿
+      add(new THREE.BoxGeometry(1.9, 4.4, 1.9), 2.2)
+      add(new THREE.ConeGeometry(1.1, 0.8, 4, 1, true), 4.8)
+      topY = 5.2
+      break
+    case 'CONTAINER':
+      // 積み上げたコンテナ
+      add(new THREE.BoxGeometry(3.2, 1.5, 3.0), 0.75)
+      add(new THREE.BoxGeometry(2.4, 1.3, 2.2), 2.15, 0.25, -0.15)
+      topY = 2.8
+      break
+    case 'SPRING':
+      // ApplicationContextのチェンバー
+      add(new THREE.CylinderGeometry(1.65, 1.65, 2.9, 20), 1.45)
+      add(new THREE.CylinderGeometry(0.9, 0.9, 0.6, 20), 3.2)
+      topY = 3.5
+      break
+    case 'MYBATIS':
+      // SQL mapping station + JDBCへ伸びるパイプ
+      add(new THREE.BoxGeometry(3.1, 2.0, 2.5), 1.0)
+      add(new THREE.CylinderGeometry(0.28, 0.28, 3.4, 12), 1.1, 2.1, 0, new THREE.Euler(0, 0, Math.PI / 2))
+      topY = 2.0
+      break
+    case 'JDBC':
+      // Wrapperのrouting ring
+      add(new THREE.BoxGeometry(2.2, 1.1, 2.2), 0.55)
+      add(new THREE.TorusGeometry(1.15, 0.3, 12, 32), 2.35, 0, 0, new THREE.Euler(Math.PI / 2.6, 0, 0))
+      topY = 3.4
+      break
+    case 'AURORA':
+      // storageドラム
+      add(new THREE.CylinderGeometry(1.75, 1.75, 2.7, 24), 1.35)
+      add(new THREE.CylinderGeometry(1.9, 1.9, 0.35, 24), 2.95)
+      topY = 3.3
+      break
+  }
+
+  group.position.set((index - 2.5) * 4.3, 0, Math.sin(index * 1.2) * 1.8)
+  return {
+    label,
+    group,
+    materials,
+    center: new THREE.Vector3(group.position.x, 1.6, group.position.z),
+    topY,
+  }
+}
+
 export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRendererOptions = {}): WorldRenderer {
   const createRenderer = options.createRenderer
     ?? ((target: HTMLCanvasElement): MinimalRenderer => new THREE.WebGLRenderer({ canvas: target, antialias: true, alpha: true }))
@@ -69,10 +150,13 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
   const scene = new THREE.Scene()
-  scene.fog = new THREE.FogExp2(0x07111f, 0.025)
+  scene.fog = new THREE.FogExp2(0x07111f, 0.022)
   const camera = new THREE.PerspectiveCamera(42, canvas.clientWidth / Math.max(canvas.clientHeight, 1), 0.1, 200)
-  camera.position.set(15, 15, 25)
-  camera.lookAt(0, 1.5, 0)
+  camera.position.copy(DEFAULT_CAMERA_POSITION)
+  const cameraGoal = DEFAULT_CAMERA_POSITION.clone()
+  const targetGoal = DEFAULT_CAMERA_TARGET.clone()
+  const currentTarget = DEFAULT_CAMERA_TARGET.clone()
+  camera.lookAt(currentTarget)
 
   scene.add(new THREE.HemisphereLight(0x9edaff, 0x07111f, 2.2))
   const key = new THREE.DirectionalLight(0xffffff, 3)
@@ -85,24 +169,20 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
   const group = new THREE.Group()
   scene.add(group)
 
-  const labels = ['ECS', 'CONTAINER', 'SPRING', 'MYBATIS', 'JDBC', 'AURORA']
-  const boxes: THREE.Mesh[] = []
   const baseMaterial = new THREE.MeshStandardMaterial({ color: 0x15324a, roughness: 0.55, metalness: 0.25 })
-  labels.forEach((label, index) => {
-    const height = 2.4 + (index % 2) * 1.2
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(3.5, height, 3.5), baseMaterial.clone())
-    mesh.position.set((index - 2.5) * 4.3, height / 2, Math.sin(index * 1.2) * 1.8)
-    group.add(mesh)
-    boxes.push(mesh)
+  const districts: District[] = DISTRICT_LABELS.map((label, index) => {
+    const district = buildDistrict(label, index, baseMaterial)
+    group.add(district.group)
     const beacon = new THREE.Mesh(
       new THREE.SphereGeometry(0.18, 16, 10),
       new THREE.MeshBasicMaterial({ color: 0x38bdf8 }),
     )
-    beacon.position.set(mesh.position.x, height + 0.45, mesh.position.z)
+    beacon.position.set(district.group.position.x, district.topY + 0.45, district.group.position.z)
     group.add(beacon)
     const sprite = createLabelSprite(label)
-    sprite.position.set(mesh.position.x, height + 1.35, mesh.position.z)
+    sprite.position.set(district.group.position.x, district.topY + 1.3, district.group.position.z)
     group.add(sprite)
+    return district
   })
 
   const flowMaterial = new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
@@ -110,8 +190,11 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
   pulse.visible = false
   group.add(pulse)
 
+  const raycaster = new THREE.Raycaster()
+
   let latest: SimulationState | null = null
   let reducedMotion = false
+  let selected: string | null = null
   let frame = 0
   const clock = new THREE.Clock()
 
@@ -129,12 +212,16 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
     resize()
     const elapsed = clock.getElapsedTime()
     // 揺れとpulse移動は装飾なのでreduced motionでは止める。状態由来の
-    // 色・emissive切替とsimulation進行はそのまま。
+    // 色・emissive切替、camera focus、simulation進行はそのまま。
     group.rotation.y = reducedMotion ? 0 : Math.sin(elapsed * 0.12) * 0.04
+    const ease = reducedMotion ? 1 : 0.08
+    camera.position.lerp(cameraGoal, ease)
+    currentTarget.lerp(targetGoal, ease)
+    camera.lookAt(currentTarget)
     if (latest) {
       const color = statusColor(latest)
       flowMaterial.color.setHex(color)
-      const activeIndex = Math.min(boxes.length - 1, Math.max(0,
+      const activeIndex = Math.min(districts.length - 1, Math.max(0,
         latest.phase === 'PROVISION_ENI' || latest.phase === 'WAIT_CAPACITY' || latest.phase === 'PULL_IMAGE' ? 0
           : latest.phase === 'START_JVM' ? 1
             : latest.phase === 'START_SPRING' || latest.phase === 'START_JOB' ? 2
@@ -142,17 +229,20 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
                 : latest.phase === 'COMMIT' || latest.phase === 'ROLLBACK' ? 5
                   : 4,
       ))
-      boxes.forEach((box, index) => {
-        const material = box.material as THREE.MeshStandardMaterial
-        material.emissive.setHex(index === activeIndex ? color : 0x000000)
-        material.emissiveIntensity = index === activeIndex ? 1.5 : 0
+      districts.forEach((district, index) => {
+        const isActive = index === activeIndex
+        const isSelected = district.label === selected
+        district.materials.forEach((material) => {
+          material.emissive.setHex(isActive ? color : isSelected ? 0x38bdf8 : 0x000000)
+          material.emissiveIntensity = isActive ? 1.5 : isSelected ? 0.6 : 0
+        })
       })
-      const from = boxes[activeIndex]?.position
-      const to = boxes[Math.min(activeIndex + 1, boxes.length - 1)]?.position
+      const from = districts[activeIndex]?.center
+      const to = districts[Math.min(activeIndex + 1, districts.length - 1)]?.center
       if (!reducedMotion && from && to && latest.phase !== 'DONE' && latest.phase !== 'IDLE') {
         pulse.visible = true
         pulse.position.lerpVectors(from, to, latest.progress)
-        pulse.position.y += 2.8
+        pulse.position.y += 3
       } else {
         pulse.visible = false
       }
@@ -167,6 +257,29 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
     },
     setReducedMotion(value) {
       reducedMotion = value
+    },
+    setSelected(district) {
+      selected = district
+    },
+    focusDistrict(district) {
+      const found = districts.find((candidate) => candidate.label === district)
+      if (found) {
+        cameraGoal.set(found.center.x + 4.5, found.topY + 4.5, found.center.z + 9)
+        targetGoal.copy(found.center)
+      } else {
+        cameraGoal.copy(DEFAULT_CAMERA_POSITION)
+        targetGoal.copy(DEFAULT_CAMERA_TARGET)
+      }
+    },
+    pickAt(ndcX, ndcY) {
+      // renderer.render()を経由しない経路(テストや初回クリック)でも
+      // 正しい行列でraycastできるよう明示的に更新する。
+      camera.updateMatrixWorld()
+      scene.updateMatrixWorld(true)
+      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera)
+      const hits = raycaster.intersectObjects(districts.map((district) => district.group), true)
+      const hit = hits.find((candidate) => typeof candidate.object.userData.district === 'string')
+      return hit ? (hit.object.userData.district as string) : null
     },
     dispose() {
       cancelFrame(frame)

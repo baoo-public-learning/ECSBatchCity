@@ -227,13 +227,17 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `prefers-reduced-motion`対応: CityCanvasがmatchMediaを購読し`world.setReducedMotion()`へ伝搬。装飾的な揺れとpulse移動を停止、状態由来の色・emissive切替とsimulation進行は維持。
 - GPU resource disposeの自動テスト: `createWorldRenderer`へWebGLRendererとframe loopを注入可能にし、fake renderer + three実物のScene構築でgeometry/material/CanvasTexture/renderer/cancelFrameのdisposeを検証。Spriteの共有geometryはdisposeしない。
 
+さらに済み(2026-08-01、建築化とpicking):
+
+- 6地区を複合プリミティブの建築へ発展(ECS=管制塔+アンテナ、CONTAINER=積みコンテナ、SPRING=チェンバー、MYBATIS=station+JDBCへのパイプ、JDBC=routing ring、AURORA=storageドラム)。
+- Raycasterによるclick picking(`world.pickAt(ndc)`)とhoverカーソル。クリックで選択地区をハイライトし、canvas上の説明パネル(各レイヤーの責務と教材上の注意)へ接続。
+- camera focus(選択地区へease移動、reduced motion時は即時)と視点リセット。デフォルトカメラを引いてAURORAラベルの見切れも解消(全6地区がpickable=画面内であることをテストで保証)。
+- pickAtはrender未経由でも正しく動くようcamera/sceneの行列を明示更新する(fake renderer環境で発覚)。
+
 残り:
 
-- 現在の抽象boxを、ECS、container、Spring、MyBatis、JDBC、Auroraの意味が分かる建築へ発展させる。
-- hover / click pickingを実装する。
-- 選択対象とInspectorを接続する。
-- camera focusとresetを実装する。
 - ENI作成、image pull、JVM起動、SQL、flush、commit、rollbackを別のflowとして表現する。
+- 建築のさらなる作り込み(質感、窓、配管など)。
 
 ### P2: Vue / Piniaテスト
 
