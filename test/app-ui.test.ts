@@ -40,7 +40,11 @@ describe('App UI', () => {
   it('shows the warning exit code 1 as a non-zero result', async () => {
     const { wrapper, store } = mountApp()
     store.start({ scenario: 'WARNING', executorType: 'SIMPLE' })
-    for (let i = 0; i < 200 && store.snapshot.phase !== 'DONE'; i++) store.advance(0.25)
+    // 紙芝居のstep pauseを「次へ」相当で解除しながら進める
+    for (let i = 0; i < 200 && store.snapshot.phase !== 'DONE'; i++) {
+      store.playing = true
+      store.advance(0.25)
+    }
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('WARNING · 1')
     expect(wrapper.text()).not.toContain('WARNING · 0')
@@ -49,7 +53,10 @@ describe('App UI', () => {
   it('offers the manual flush button only while a flush is waiting', async () => {
     const { wrapper, store } = mountApp()
     store.start({ executorType: 'BATCH', autoFlush: false, statementCount: 10, flushThreshold: 10 })
-    for (let i = 0; i < 200 && store.snapshot.phase !== 'FLUSH_BATCH'; i++) store.advance(0.25)
+    for (let i = 0; i < 200 && store.snapshot.phase !== 'FLUSH_BATCH'; i++) {
+      store.playing = true
+      store.advance(0.25)
+    }
     await wrapper.vm.$nextTick()
     const flushButton = findButton(wrapper, 'flushStatements()')
     await flushButton.trigger('click')

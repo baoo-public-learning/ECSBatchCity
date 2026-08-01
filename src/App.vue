@@ -67,8 +67,16 @@ const narrationTone: Record<string, string> = {
   warning: 'border-amber-500/60',
   error: 'border-red-500/60',
 }
+// step: phaseごとに一時停止し「次へ」で進む(既定)。auto: 連続再生。
+const paceMode = ref<'step' | 'auto'>('step')
+const waitingManualFlush = computed(() => state.value.phase === 'FLUSH_BATCH' && !state.value.flushRequested)
+function nextStep(): void {
+  store.playing = true
+}
 watch(() => state.value.phase, (phase) => {
-  if (!followCamera.value || phase === 'IDLE') return
+  if (phase === 'IDLE') return
+  if (paceMode.value === 'step' && phase !== 'DONE') store.playing = false
+  if (!followCamera.value) return
   if (phase === 'DONE') {
     cityCanvas.value?.resetView?.()
     return
@@ -126,8 +134,11 @@ function updateCountLabel(count: number): string {
 }
 
 onMounted(() => {
-  // デモ・スクリーンショット用: ?autorun=1 で読み込み直後にRunTaskする。
-  if (new URLSearchParams(window.location.search).has('autorun')) start()
+  // デモ・スクリーンショット用: ?autorun=1 で読み込み直後にRunTaskする(自動再生)。
+  if (new URLSearchParams(window.location.search).has('autorun')) {
+    paceMode.value = 'auto'
+    start()
+  }
   let previous = performance.now()
   timer = window.setInterval(() => {
     const current = performance.now()
@@ -307,12 +318,21 @@ onBeforeUnmount(() => window.clearInterval(timer))
         <div v-if="narration" :key="narration.title" class="absolute bottom-28 left-1/2 z-10 w-[min(92vw,620px)] -translate-x-1/2 rounded-2xl border-2 bg-slate-950/85 p-4 backdrop-blur" :class="narrationTone[narration.tone]">
           <div class="flex items-start justify-between gap-3">
             <p class="text-base font-bold text-white">{{ narration.title }}</p>
-            <label class="flex shrink-0 items-center gap-1.5 text-[10px] text-slate-400">
-              カメラ追従
-              <input v-model="followCamera" type="checkbox" class="size-3.5 accent-sky-400" />
-            </label>
+            <div class="flex shrink-0 items-center gap-3 text-[10px] text-slate-400">
+              <label class="flex items-center gap-1">
+                自動再生
+                <input type="checkbox" :checked="paceMode === 'auto'" class="size-3.5 accent-sky-400" @change="paceMode = paceMode === 'auto' ? 'step' : 'auto'; if (paceMode === 'auto') nextStep()" />
+              </label>
+              <label class="flex items-center gap-1">
+                カメラ追従
+                <input v-model="followCamera" type="checkbox" class="size-3.5 accent-sky-400" />
+              </label>
+            </div>
           </div>
           <p class="mt-1.5 text-sm leading-6 text-slate-200">{{ narration.body }}</p>
+          <button v-if="paceMode === 'step' && !store.playing && state.phase !== 'DONE' && !waitingManualFlush" class="mt-3 w-full rounded-lg bg-sky-400 px-4 py-2.5 font-bold text-slate-950 transition hover:bg-sky-300" @click="nextStep">
+            次へ ▶
+          </button>
         </div>
       </transition>
 
