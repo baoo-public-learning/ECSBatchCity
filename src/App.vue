@@ -39,6 +39,8 @@ let timer = 0
 const state = computed(() => store.snapshot)
 const cityCanvas = ref<InstanceType<typeof CityCanvas> | null>(null)
 const selectedDistrict = ref<string | null>(null)
+// モバイルでは左右パネルをドロワー化(nullなら閉)。lg以上では常時表示。
+const mobilePanel = ref<'control' | 'inspector' | null>(null)
 
 const districtInfo: Record<string, string> = {
   ECS: 'RunTaskを受け付けるcontrol plane。desiredStatusと実状態(lastStatus)を別々に管理し、停止理由はstopCode / stoppedReasonとして残ります。',
@@ -95,6 +97,7 @@ const resultTone = computed(() => ({
 const reversedEvents = computed(() => [...state.value.events].reverse())
 
 function start(): void {
+  mobilePanel.value = null
   store.start({
     scenario: scenario.value,
     executorType: executorType.value,
@@ -151,7 +154,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
 </script>
 
 <template>
-  <main class="relative h-screen w-full overflow-hidden bg-[#0b1520]">
+  <main class="relative h-[100dvh] w-full overflow-hidden bg-[#0b1520]">
     <div class="absolute inset-0">
       <CityCanvas ref="cityCanvas" @select="onDistrictSelect" />
     </div>
@@ -167,9 +170,11 @@ onBeforeUnmount(() => window.clearInterval(timer))
           </div>
         </div>
       </div>
-      <div class="flex items-center gap-3 text-xs">
-        <span class="rounded-full border border-slate-600/60 bg-slate-800/60 px-3 py-1.5">Java 21</span>
-        <span class="rounded-full border border-slate-600/60 bg-slate-800/60 px-3 py-1.5">Fargate · awsvpc</span>
+      <div class="flex items-center gap-2 text-xs lg:gap-3">
+        <button class="rounded-full border border-sky-500/50 bg-sky-500/10 px-3 py-1.5 font-semibold text-sky-200 lg:hidden" @click="mobilePanel = mobilePanel === 'control' ? null : 'control'">設定</button>
+        <button class="rounded-full border border-sky-500/50 bg-sky-500/10 px-3 py-1.5 font-semibold text-sky-200 lg:hidden" @click="mobilePanel = mobilePanel === 'inspector' ? null : 'inspector'">詳細</button>
+        <span class="hidden rounded-full border border-slate-600/60 bg-slate-800/60 px-3 py-1.5 sm:inline">Java 21</span>
+        <span class="hidden rounded-full border border-slate-600/60 bg-slate-800/60 px-3 py-1.5 sm:inline">Fargate · awsvpc</span>
         <span role="status" aria-live="polite" class="mono rounded-full border px-3 py-1.5" :class="resultTone">
           {{ state.applicationResult }} · {{ state.applicationExitCode ?? '—' }}
         </span>
@@ -177,7 +182,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
     </header>
 
     <section>
-      <aside class="absolute bottom-24 left-4 top-20 z-10 w-80 overflow-y-auto rounded-2xl border border-slate-700/60 bg-slate-950/80 p-4 backdrop-blur">
+      <aside class="absolute bottom-24 left-2 right-2 top-16 z-30 overflow-y-auto rounded-2xl border border-slate-700/60 bg-slate-950/90 p-4 backdrop-blur lg:bottom-24 lg:left-4 lg:right-auto lg:top-20 lg:z-10 lg:block lg:w-80 lg:bg-slate-950/80" :class="mobilePanel === 'control' ? 'block' : 'hidden'">
         <div class="mb-5 flex items-center justify-between">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/70">Control plane</p>
@@ -315,7 +320,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <p v-else class="pointer-events-none absolute left-1/2 top-20 z-10 -translate-x-1/2 rounded bg-slate-950/60 px-3 py-1 text-[11px] text-slate-300">ドラッグで回転 · ホイールでズーム · 建物クリックで説明と視点</p>
 
       <transition name="fade" mode="out-in">
-        <div v-if="narration" :key="narration.title" class="absolute bottom-28 left-1/2 z-10 w-[min(92vw,620px)] -translate-x-1/2 rounded-2xl border-2 bg-slate-950/85 p-4 backdrop-blur" :class="narrationTone[narration.tone]">
+        <div v-if="narration" :key="narration.title" class="absolute bottom-44 left-1/2 z-10 w-[min(88vw,620px)] lg:bottom-28 -translate-x-1/2 rounded-2xl border-2 bg-slate-950/85 p-4 backdrop-blur" :class="narrationTone[narration.tone]">
           <div class="flex items-start justify-between gap-3">
             <p class="text-base font-bold text-white">{{ narration.title }}</p>
             <div class="flex shrink-0 items-center gap-3 text-[10px] text-slate-400">
@@ -338,7 +343,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
 
       <section>
         <div>
-          <div class="absolute bottom-4 left-1/2 z-10 grid w-[min(92vw,860px)] -translate-x-1/2 grid-cols-3 gap-2 sm:grid-cols-6">
+          <div class="absolute bottom-4 left-1/2 z-10 grid w-[min(88vw,860px)] -translate-x-1/2 grid-cols-3 gap-2 sm:grid-cols-6">
             <div v-for="item in [
               ['ECS', state.ecsStatus],
               ['SPRING', state.springStatus],
@@ -354,7 +359,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
         </div>
       </section>
 
-      <aside class="absolute bottom-24 right-4 top-20 z-10 w-[22.5rem] overflow-y-auto rounded-2xl border border-slate-700/60 bg-slate-950/80 p-4 backdrop-blur">
+      <aside class="absolute bottom-24 left-2 right-2 top-16 z-30 overflow-y-auto rounded-2xl border border-slate-700/60 bg-slate-950/90 p-4 backdrop-blur lg:bottom-24 lg:left-auto lg:right-4 lg:top-20 lg:z-10 lg:block lg:w-[22.5rem] lg:bg-slate-950/80" :class="mobilePanel === 'inspector' ? 'block' : 'hidden'">
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/70">Execution inspector</p>
