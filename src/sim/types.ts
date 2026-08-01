@@ -142,6 +142,8 @@ export interface SimulationState {
     }
   }
   config: SimulationConfig
+  // 教材用の縮尺値。young GCの回数と停止時間の累計。
+  gc: { youngCount: number; pauseMs: number }
   events: TimelineEvent[]
   nextEventId: number
 }

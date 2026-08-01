@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { SimulationState } from '../sim/types'
+import { flowForPhase } from './flows'
 
 interface WorldRenderer {
   update(snapshot: SimulationState): void
@@ -237,9 +238,10 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
           material.emissiveIntensity = isActive ? 1.5 : isSelected ? 0.6 : 0
         })
       })
-      const from = districts[activeIndex]?.center
-      const to = districts[Math.min(activeIndex + 1, districts.length - 1)]?.center
-      if (!reducedMotion && from && to && latest.phase !== 'DONE' && latest.phase !== 'IDLE') {
+      const flow = flowForPhase(latest.phase, latest.executorType)
+      const from = flow ? districts[flow.from]?.center : undefined
+      const to = flow ? districts[flow.to]?.center : undefined
+      if (!reducedMotion && from && to) {
         pulse.visible = true
         pulse.position.lerpVectors(from, to, latest.progress)
         pulse.position.y += 3

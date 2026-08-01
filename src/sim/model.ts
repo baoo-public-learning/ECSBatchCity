@@ -49,6 +49,13 @@ function event(state: SimulationState, label: string, kind: TimelineEvent['kind'
   state.events.push({ id: state.nextEventId++, at: state.now, label, kind })
 }
 
+// heap churnの大きい節目でyoung GCを1回起こす縮尺モデル。SerialはG1より
+// pauseが長い、という相対関係だけを教える。
+function recordYoungGc(state: SimulationState): void {
+  state.gc.youngCount += 1
+  state.gc.pauseMs += state.java.gcName === 'Serial' ? 12 : 4
+}
+
 function enter(state: SimulationState, phase: Phase): void {
   state.phase = phase
   state.phaseElapsed = 0
@@ -71,6 +78,7 @@ function enter(state: SimulationState, phase: Phase): void {
       break
     case 'START_SPRING':
       state.springStatus = 'STARTING'
+      recordYoungGc(state)
       event(state, 'Spring ApplicationContextを構築')
       break
     case 'START_JOB':
@@ -230,6 +238,7 @@ export function createInitialState(config: Partial<SimulationConfig> = {}): Simu
     launchFailed: false,
     java: buildJavaModel(resolved),
     config: resolved,
+    gc: { youngCount: 0, pauseMs: 0 },
     events: [],
     nextEventId: 1,
   }
@@ -417,6 +426,7 @@ function advancePhase(state: SimulationState): void {
       state.pendingStatements = 0
       state.flushedStatements += pending
       state.sqlExecutions += 1
+      recordYoungGc(state)
       event(state, `executeBatch() 完了 · BatchResult #${state.batchResults.length} update counts ${pending}件`)
       if (state.mapperCalls < state.config.statementCount) {
         enter(state, 'RUN_TASKLET')
@@ -428,6 +438,7 @@ function advancePhase(state: SimulationState): void {
     case 'COMMIT':
       state.transaction = 'COMMITTED'
       state.batchStatus = 'COMPLETED'
+      recordYoungGc(state)
       if (state.updateCount === 0) {
         state.batchExitStatus = 'WARNING'
         state.applicationResult = 'WARNING'

@@ -216,9 +216,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - メモリ設定起因OOM: BATCHのpending batchのheap需要(96 + maxPending×4 MiB の概算モデル)が最大heapを超えるとExitOnOutOfMemoryError(exit 3)。**flushThresholdを下げると回避できる**というメモリ×batch設計の連動を表現。
 - あわせてECS stop metadataを正確化: StopTaskは`UserInitiated`/`Task stopped by user`、RUNNING前のStopTaskはSIGTERMなしの起動中止(exitCodeなし)へ修正。
 
-残り:
-
-- GC activity(GC回数・pause時間などの動的表示)
+さらに済み(2026-08-01): GC activityの動的表示。Spring起動・各flush・commitでyoung GCを1回起こす縮尺モデル(`state.gc`)で、SerialはG1よりpauseが長い相対関係を表示する。
 
 ### P2: 3D表現
 
@@ -235,10 +233,13 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - camera focus(選択地区へease移動、reduced motion時は即時)と視点リセット。デフォルトカメラを引いてAURORAラベルの見切れも解消(全6地区がpickable=画面内であることをテストで保証)。
 - pickAtはrender未経由でも正しく動くようcamera/sceneの行列を明示更新する(fake renderer環境で発覚)。
 
+さらに済み(2026-08-01、フロー種別):
+
+- phaseごとの処理フローを`src/three/flows.ts`の純粋関数で定義し、pulseが意味のある方向へ流れるようにした。ENI/image pullはECS→CONTAINER、JVM起動はCONTAINER→SPRING、SQL/flushはSPRING→MYBATIS→AURORA、commitはJDBC→AURORA、**rollbackとshutdownは逆方向**(AURORA→JDBC、SPRING→CONTAINER→ECS)、failoverはJDBC↔AURORA間。
+
 残り:
 
-- ENI作成、image pull、JVM起動、SQL、flush、commit、rollbackを別のflowとして表現する。
-- 建築のさらなる作り込み(質感、窓、配管など)。
+- 建築のさらなる作り込み(質感、窓、配管など)とフローの視覚差別化(色・形状をフロー種別で変える)。
 
 ### P2: Vue / Piniaテスト
 
@@ -248,9 +249,11 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - component test(`test/app-ui.test.ts`、@vue/test-utils + happy-dom): RunTask/シナリオselectのactive中disable、warning `1`の非ゼロ表示、manual flushボタンの出現と消滅、unmount時のinterval解除、ボタンの可読ラベル
 - renderer cleanup test(`test/world-renderer.test.ts`)
 
+さらに済み(2026-08-01): 結果チップを`role="status"` + `aria-live="polite"`のlive regionにし、全form controlがlabelで包まれていることをテストで固定。
+
 残り:
 
-- スクリーンリーダー観点のaccessibility test(aria属性の検証など)
+- キーボード操作での3D地区選択(現状はマウス/タップのみ)
 
 ### P2: 配信と保守
 
@@ -278,8 +281,10 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `test/failover-retry.test.ts`: RETRY_TASKLET、attempt管理、旧attempt除外のtest
 - `test/stop-metadata.test.ts`: UserInitiated、起動前StopTaskの起動中止のtest
 - `test/java-container.test.ts`: heap/CPU/GC導出、JAVA_TOOL_OPTIONS、native予算、メモリ設定起因OOMのtest
-- `test/app-ui.test.ts`: App.vueのcomponent test(happy-dom)
-- `test/world-renderer.test.ts`: Three.js rendererのdispose / reduced motion test
+- `test/app-ui.test.ts`: App.vueのcomponent test(happy-dom、a11y含む)
+- `test/world-renderer.test.ts`: Three.js rendererのdispose / reduced motion / picking test
+- `test/flows.test.ts`: phase→フロー方向のtest(rollback逆流など)
+- `test/gc-activity.test.ts`: GC activity縮尺モデルのtest
 - `test/store.test.ts`: Pinia store経由のreactive proxy回帰test(structuredClone対策)
 - `src/stores/simulation.ts`: Piniaとsimulationの接続
 - `src/App.vue`: 現在の操作UIとInspector

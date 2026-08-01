@@ -125,7 +125,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <div class="flex items-center gap-3 text-xs">
         <span class="rounded-full border border-slate-600/60 bg-slate-800/60 px-3 py-1.5">Java 21</span>
         <span class="rounded-full border border-slate-600/60 bg-slate-800/60 px-3 py-1.5">Fargate · awsvpc</span>
-        <span class="mono rounded-full border px-3 py-1.5" :class="resultTone">
+        <span role="status" aria-live="polite" class="mono rounded-full border px-3 py-1.5" :class="resultTone">
           {{ state.applicationResult }} · {{ state.applicationExitCode ?? '—' }}
         </span>
       </div>
@@ -322,6 +322,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <dt class="text-slate-500">Initial heap</dt><dd class="mono text-right">{{ state.java.initialHeapMiB }} MiB ({{ state.java.initialRamPercentage }}%)</dd>
             <dt class="text-slate-500">Max heap</dt><dd class="mono text-right">{{ state.java.maxHeapMiB }} MiB ({{ state.java.maxRamPercentage }}%)</dd>
             <dt class="text-slate-500">GC</dt><dd class="mono text-right">{{ state.java.gcName }}</dd>
+            <dt class="text-slate-500">GC activity</dt><dd class="mono text-right">young {{ state.gc.youngCount }}回 · {{ state.gc.pauseMs }}ms</dd>
             <dt class="text-slate-500">JDBC stack</dt><dd class="text-right">AWS Wrapper → pgJDBC</dd>
             <dt class="text-slate-500">Writer host</dt><dd class="mono text-right">{{ state.writerHost }}</dd>
             <dt class="text-slate-500">Failover</dt><dd class="mono text-right" :class="state.failoverState === 'NONE' ? '' : 'text-amber-300'">{{ state.failoverState }}</dd>

@@ -72,6 +72,21 @@ describe('App UI', () => {
     }
   })
 
+  it('announces the application result via a live region', () => {
+    const { wrapper } = mountApp()
+    const status = wrapper.find('[role="status"]')
+    expect(status.exists()).toBe(true)
+    expect(status.attributes('aria-live')).toBe('polite')
+  })
+
+  it('associates every form control with a label', () => {
+    const { wrapper } = mountApp()
+    for (const control of wrapper.findAll('select, input')) {
+      const wrapped = control.element.closest('label')
+      expect(wrapped, `unlabeled control: ${control.html().slice(0, 60)}`).not.toBeNull()
+    }
+  })
+
   it('keeps the 3D layer names available to assistive technology', () => {
     const { wrapper } = mountApp()
     const srText = wrapper.find('.sr-only')
