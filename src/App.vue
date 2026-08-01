@@ -104,6 +104,8 @@ function updateCountLabel(count: number): string {
 }
 
 onMounted(() => {
+  // デモ・スクリーンショット用: ?autorun=1 で読み込み直後にRunTaskする。
+  if (new URLSearchParams(window.location.search).has('autorun')) start()
   let previous = performance.now()
   timer = window.setInterval(() => {
     const current = performance.now()
@@ -116,8 +118,13 @@ onBeforeUnmount(() => window.clearInterval(timer))
 </script>
 
 <template>
-  <main class="min-h-screen bg-[radial-gradient(circle_at_50%_-10%,#163c5b_0%,#07111f_46%,#040a12_100%)]">
-    <header class="flex flex-wrap items-center justify-between gap-4 border-b border-sky-900/50 px-5 py-4 lg:px-8">
+  <main class="relative h-screen w-full overflow-hidden bg-[#0b1520]">
+    <div class="absolute inset-0">
+      <CityCanvas ref="cityCanvas" @select="onDistrictSelect" />
+    </div>
+    <p class="sr-only">3Dシーンのレイヤー: ECS、CONTAINER、SPRING、MYBATIS、JDBC、AURORA。現在の状態は下部のステータスタイルとExecution inspectorに表示されます。</p>
+
+    <header class="absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/30 bg-slate-950/70 px-5 py-3 backdrop-blur lg:px-8">
       <div>
         <div class="flex items-center gap-3">
           <span class="grid size-9 place-items-center rounded-lg border border-sky-400/30 bg-sky-400/10 text-sm font-black text-sky-300">EC</span>
@@ -136,8 +143,8 @@ onBeforeUnmount(() => window.clearInterval(timer))
       </div>
     </header>
 
-    <section class="grid gap-4 p-4 lg:grid-cols-[310px_minmax(0,1fr)_340px] lg:p-6">
-      <aside class="panel order-2 rounded-2xl p-4 lg:order-1">
+    <section>
+      <aside class="absolute bottom-24 left-4 top-20 z-10 w-80 overflow-y-auto rounded-2xl border border-slate-700/60 bg-slate-950/80 p-4 backdrop-blur">
         <div class="mb-5 flex items-center justify-between">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/70">Control plane</p>
@@ -265,19 +272,18 @@ onBeforeUnmount(() => window.clearInterval(timer))
         </div>
       </aside>
 
-      <section class="order-1 min-h-[430px] overflow-hidden rounded-2xl border border-sky-900/50 bg-slate-950/50 lg:order-2 lg:min-h-[680px]">
-        <div class="relative h-full min-h-[430px] lg:min-h-[680px]">
-          <CityCanvas ref="cityCanvas" @select="onDistrictSelect" />
-          <p class="sr-only">3Dシーンのレイヤー: ECS、CONTAINER、SPRING、MYBATIS、JDBC、AURORA。現在の状態は下部のステータスタイルとExecution inspectorに表示されます。</p>
-          <div v-if="selectedDistrict" class="absolute left-4 top-4 max-w-xs rounded-xl border border-sky-700/50 bg-slate-950/85 p-3 text-xs backdrop-blur">
-            <div class="flex items-center justify-between gap-3">
-              <span class="font-bold tracking-[0.14em] text-sky-200">{{ selectedDistrict }}</span>
-              <button class="rounded border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300 transition hover:bg-slate-800" @click="resetView">視点リセット</button>
-            </div>
-            <p class="mt-1.5 leading-5 text-slate-300">{{ districtInfo[selectedDistrict] }}</p>
-          </div>
-          <p v-else class="pointer-events-none absolute left-4 top-4 rounded bg-slate-950/60 px-2 py-1 text-[10px] text-slate-500">建物をクリックすると説明と視点が切り替わります</p>
-          <div class="absolute bottom-4 left-4 right-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
+      <div v-if="selectedDistrict" class="absolute left-1/2 top-20 z-10 w-full max-w-sm -translate-x-1/2 rounded-xl border border-sky-700/50 bg-slate-950/85 p-3 text-xs backdrop-blur">
+        <div class="flex items-center justify-between gap-3">
+          <span class="font-bold tracking-[0.14em] text-sky-200">{{ selectedDistrict }}</span>
+          <button class="rounded border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300 transition hover:bg-slate-800" @click="resetView">視点リセット</button>
+        </div>
+        <p class="mt-1.5 leading-5 text-slate-300">{{ districtInfo[selectedDistrict] }}</p>
+      </div>
+      <p v-else class="pointer-events-none absolute left-1/2 top-20 z-10 -translate-x-1/2 rounded bg-slate-950/60 px-3 py-1 text-[11px] text-slate-300">ドラッグで回転 · ホイールでズーム · 建物クリックで説明と視点</p>
+
+      <section>
+        <div>
+          <div class="absolute bottom-4 left-1/2 z-10 grid w-[min(92vw,860px)] -translate-x-1/2 grid-cols-3 gap-2 sm:grid-cols-6">
             <div v-for="item in [
               ['ECS', state.ecsStatus],
               ['SPRING', state.springStatus],
@@ -293,7 +299,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
         </div>
       </section>
 
-      <aside class="panel order-3 rounded-2xl p-4">
+      <aside class="absolute bottom-24 right-4 top-20 z-10 w-[22.5rem] overflow-y-auto rounded-2xl border border-slate-700/60 bg-slate-950/80 p-4 backdrop-blur">
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/70">Execution inspector</p>
@@ -417,7 +423,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
       </aside>
     </section>
 
-    <footer class="px-6 pb-6 text-center text-xs text-slate-600">
+    <footer class="pointer-events-none absolute bottom-1 left-1/2 z-10 -translate-x-1/2 text-center text-[10px] text-slate-400">
       実AWSへ接続しない決定論的な教材モデルです。時間と数量は視認性のため縮尺しています。
     </footer>
   </main>

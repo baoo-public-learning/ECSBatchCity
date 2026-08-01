@@ -291,6 +291,19 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - `.github/workflows/ci.yml`: pull request検証
 - `.github/workflows/pages.yml`: GitHub Pages deploy
 
+## CityScape v2(2026-08-01着手)
+
+所有者の目視評価により、現行の3D(暗い空+抽象6箱+単一pulse)は不合格。目標は[PGSimCity](https://nikolays.github.io/PGSimCity/)([source](https://github.com/NikolayS/PGSimCity))の方向性:
+
+1. **フルスクリーン3D+フローティングHUD**: 3-カラムDOMをやめ、canvasが全画面。操作パネルとinspectorは3Dの上に浮くパネルにする。
+2. **明るい空と地区プレート**: 日中系の空、大きな地面プレートに意味色の地区ゾーン(ECS/CONTAINER/SPRING/MYBATIS/JDBC/AURORA)。
+3. **地区ごとの複数建築**: 1箱ではなく2〜5個の構造物(例: AURORAはwriter-1ドラム+writer-2スタンバイ+storage円盤)。
+4. **道路と多粒子トラフィック**: 地区間を結ぶ道路の上を、phaseフローに沿って複数粒子が流れる。色は意味で固定(SQL=空色、flush=琥珀、commit=緑、rollback=赤逆流)。
+5. **データ駆動のディテール**: pendingStatements=MYBATISの箱の山、flush済み=AURORA側へ、failover=writer-2の点灯、など状態が景色に出る。
+6. **OrbitControls**: 回転・ズームで探索可能に。クリックfocus・キーボード選択は維持。
+
+検証はheadless Chrome(SwiftShader)スクリーンショットの反復で行う。PGSimCityのsourceはセッションのscratchpad(pgsimcity-src)にclone済み(参考: src/world/レイアウト、src/engine/flows.ts、src/ui/hud.ts)。
+
 ## 次の推奨タスク
 
 最初のタスクは「mobile幅の目視QA」にする(この環境ではChromeウィンドウのresizeとDevTools device emulationが拡張の制約で利用できなかったため未実施。実機または別環境で確認すること)。その後はP1「終了と障害」(Aurora接続失敗、writer failover、OOM系)またはP1「Java 21設定」へ進む。
