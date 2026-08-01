@@ -78,6 +78,9 @@ export interface SimulationConfig {
   flushThreshold: number
   failAtStatement: number
   hangOnSigterm: boolean
+  // pgjdbcのreWriteBatchedInserts。INSERTを複数行へ書き換えて高速化する
+  // 代わりに、成功グループのupdate countsはSUCCESS_NO_INFO(-2)になる。
+  rewriteBatchedInserts: boolean
   failoverPolicy: FailoverPolicy
   autoFlush: boolean
   taskCpu: number

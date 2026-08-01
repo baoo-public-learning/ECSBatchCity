@@ -7,6 +7,7 @@ const DEFAULT_CONFIG: SimulationConfig = {
   flushThreshold: 10,
   failAtStatement: 6,
   hangOnSigterm: false,
+  rewriteBatchedInserts: false,
   failoverPolicy: 'FAIL_JOB',
   autoFlush: true,
   taskCpu: 1024,
@@ -260,12 +261,19 @@ function completeWork(state: SimulationState): void {
     return
   }
 
-  // 失われたattemptのupdate countsは確定件数に含めない。
-  state.updateCount = state.executorType === 'BATCH'
-    ? state.batchResults
+  // 失われたattemptのupdate countsは確定件数に含めない。SUCCESS_NO_INFO(-2)を
+  // 含む場合は件数を合計できない(nullのまま)。
+  if (state.executorType === 'BATCH') {
+    const counts = state.batchResults
       .filter((result) => result.attempt === state.attempt)
-      .reduce((sum, result) => sum + result.updateCounts.reduce((a, b) => a + b, 0), 0)
-    : state.config.scenario === 'WARNING' ? 0 : state.config.statementCount
+      .flatMap((result) => result.updateCounts)
+    state.updateCount = counts.some((count) => count < 0) ? null : counts.reduce((sum, count) => sum + count, 0)
+    if (state.updateCount === null) {
+      event(state, 'update countsはSUCCESS_NO_INFO · 書き換え対象INSERTの個別件数は保証されない', 'warning')
+    }
+  } else {
+    state.updateCount = state.config.scenario === 'WARNING' ? 0 : state.config.statementCount
+  }
   enter(state, 'COMMIT')
 }
 
@@ -397,8 +405,8 @@ function advancePhase(state: SimulationState): void {
         state.batchResults.push({
           flushIndex: state.batchResults.length + 1,
           attempt: state.attempt,
-          mappedStatementId: 'RecordMapper.upsertRecord',
-          sql: 'UPDATE records SET payload = ? WHERE id = ?',
+          mappedStatementId: 'RecordMapper.insertRecord',
+          sql: 'INSERT INTO records (id, payload) VALUES (?, ?) ON CONFLICT DO NOTHING',
           parameterCount: pending,
           updateCounts: Array.from({ length: pending }, () => -3),
           successfulStatementCount: 0,
@@ -412,12 +420,17 @@ function advancePhase(state: SimulationState): void {
         enter(state, 'ROLLBACK')
         break
       }
-      const perStatementUpdateCount = state.config.scenario === 'WARNING' ? 0 : 1
+      // workloadは設定に関係なく同じINSERT batch。reWriteBatchedInsertsは
+      // 既存INSERT batchの複数行化だけを行い、成功グループのupdate countsを
+      // SUCCESS_NO_INFO(-2)へ変える。グループ合計が0(全件conflict)なら0が
+      // 返るため、更新0件の検出は引き続き可能(pgjdbc実挙動)。
+      const rewrite = state.config.rewriteBatchedInserts
+      const perStatementUpdateCount = state.config.scenario === 'WARNING' ? 0 : rewrite ? -2 : 1
       state.batchResults.push({
         flushIndex: state.batchResults.length + 1,
         attempt: state.attempt,
-        mappedStatementId: 'RecordMapper.upsertRecord',
-        sql: 'UPDATE records SET payload = ? WHERE id = ?',
+        mappedStatementId: 'RecordMapper.insertRecord',
+        sql: 'INSERT INTO records (id, payload) VALUES (?, ?) ON CONFLICT DO NOTHING',
         parameterCount: pending,
         updateCounts: Array.from({ length: pending }, () => perStatementUpdateCount),
         successfulStatementCount: pending,

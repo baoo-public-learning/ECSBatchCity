@@ -13,6 +13,7 @@ const flushThreshold = ref(10)
 const failAtStatement = ref(6)
 const autoFlush = ref(true)
 const hangOnSigterm = ref(false)
+const rewriteBatchedInserts = ref(false)
 const failoverPolicy = ref<FailoverPolicy>('FAIL_JOB')
 const taskCpu = ref(1024)
 const taskMemoryMiB = ref(2048)
@@ -72,6 +73,7 @@ function start(): void {
     failAtStatement: failAtStatement.value,
     autoFlush: autoFlush.value,
     hangOnSigterm: hangOnSigterm.value,
+    rewriteBatchedInserts: rewriteBatchedInserts.value,
     failoverPolicy: failoverPolicy.value,
     taskCpu: taskCpu.value,
     taskMemoryMiB: taskMemoryMiB.value,
@@ -90,12 +92,15 @@ function eventDot(event: TimelineEvent): string {
 }
 
 function updateCountTotal(updateCounts: number[]): string {
-  if (updateCounts.some((count) => count < 0)) return '—(保証なし)'
+  if (updateCounts.some((count) => count === -3)) return '—(保証なし)'
+  if (updateCounts.some((count) => count === -2)) return '不明(SUCCESS_NO_INFO)'
   return String(updateCounts.reduce((total, count) => total + count, 0))
 }
 
 function updateCountLabel(count: number): string {
-  return count === -3 ? '×' : String(count)
+  if (count === -3) return '×'
+  if (count === -2) return '?'
+  return String(count)
 }
 
 onMounted(() => {
@@ -179,6 +184,14 @@ onBeforeUnmount(() => window.clearInterval(timer))
           <label v-if="['FLUSH_FAILURE', 'WRITER_FAILOVER', 'JVM_OOM', 'ECS_OOM_KILL'].includes(scenario)" class="block text-sm text-slate-300">
             障害発生statement位置 <span class="mono float-right text-red-300">{{ Math.min(failAtStatement, statementCount) }}件目</span>
             <input v-model.number="failAtStatement" :disabled="store.isActive" type="range" min="1" :max="statementCount" class="mt-2 w-full accent-red-400 disabled:opacity-50" />
+          </label>
+
+          <label v-if="executorType === 'BATCH'" class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-300">
+            <span>
+              reWriteBatchedInserts
+              <span class="block text-[10px] text-slate-500">INSERTを複数行へ書き換えて高速化。個別のupdate countは?(-2)になる</span>
+            </span>
+            <input v-model="rewriteBatchedInserts" :disabled="store.isActive" type="checkbox" class="size-4 shrink-0 accent-sky-400 disabled:opacity-50" />
           </label>
 
           <label v-if="executorType === 'BATCH'" class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-300">
@@ -373,6 +386,9 @@ onBeforeUnmount(() => window.clearInterval(timer))
               </p>
               <p v-if="result.failedStatementIndex !== null" class="mt-1 text-[10px] leading-4 text-slate-500">
                 × = EXECUTE_FAILED(成功として保証されない)
+              </p>
+              <p v-else-if="result.updateCounts.includes(-2)" class="mt-1 text-[10px] leading-4 text-slate-500">
+                ? = SUCCESS_NO_INFO(成功したが個別件数は不明)
               </p>
             </li>
           </ol>

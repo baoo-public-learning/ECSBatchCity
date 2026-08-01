@@ -176,9 +176,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - SIMPLE + FLUSH_FAILUREはstatement失敗としてrollback(BatchResultなし)。
 - UI: シナリオ選択、失敗位置スライダー、失敗flushの赤表示、×=EXECUTE_FAILED凡例、「partial update countsはpartial commitを意味しない」注記。
 
-残り:
-
-- `SUCCESS_NO_INFO(-2)`のupdate counts形式の扱い(合計に-2を含めない表示)。
+さらに済み(2026-08-01): `reWriteBatchedInserts`設定を追加し`SUCCESS_NO_INFO(-2)`を実装した。pgjdbc実挙動(Codex調査)に準拠: 成功グループは全要素-2で個別件数は保証されないが、**グループ全体が0件なら0が返るため更新0件警告は引き続き検出できる**。対象はINSERTのみ(表示SQLもINSERTへ切替)。合計は「不明(SUCCESS_NO_INFO)」表示、?=凡例付き。
 
 ### P1: 終了と障害
 
@@ -251,9 +249,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 さらに済み(2026-08-01): 結果チップを`role="status"` + `aria-live="polite"`のlive regionにし、全form controlがlabelで包まれていることをテストで固定。
 
-残り:
-
-- キーボード操作での3D地区選択(現状はマウス/タップのみ)
+さらに済み(2026-08-01): キーボードでの3D地区選択(canvasへtabindex+role=application、左右矢印で巡回・Escapeで解除、`district-keyboard.ts`の純粋関数をテスト)。READMEも現機能セットへ更新。
 
 ### P2: 配信と保守
 

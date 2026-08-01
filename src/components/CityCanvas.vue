@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useSimulationStore } from '../stores/simulation'
 import { createWorldRenderer } from '../three/create-world-renderer'
+import { nextDistrictForKey } from '../three/district-keyboard'
 
 const emit = defineEmits<{ (event: 'select', district: string | null): void }>()
 
@@ -27,6 +28,7 @@ function onClick(event: MouseEvent): void {
   const ndc = toNdc(event)
   if (!ndc || !world) return
   const district = world.pickAt(ndc.x, ndc.y)
+  keyboardSelection = district
   world.setSelected(district)
   world.focusDistrict(district)
   emit('select', district)
@@ -41,7 +43,22 @@ function onPointerMove(event: PointerEvent): void {
   canvas.value.style.cursor = world.pickAt(ndc.x, ndc.y) ? 'pointer' : 'default'
 }
 
+let keyboardSelection: string | null = null
+
+function onKeydown(event: KeyboardEvent): void {
+  // 端の地区でも矢印キーはこの操作系が処理済みとし、ページスクロール等の
+  // ブラウザ既定動作へ漏らさない。
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Escape') event.preventDefault()
+  const next = nextDistrictForKey(keyboardSelection, event.key)
+  if (next === keyboardSelection) return
+  keyboardSelection = next
+  world?.setSelected(next)
+  world?.focusDistrict(next)
+  emit('select', next)
+}
+
 function resetView(): void {
+  keyboardSelection = null
   world?.setSelected(null)
   world?.focusDistrict(null)
 }
@@ -71,9 +88,12 @@ onBeforeUnmount(() => dispose?.())
 <template>
   <canvas
     ref="canvas"
-    class="h-full w-full"
-    aria-label="ECS Batch City 3D visualization"
+    class="h-full w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
+    tabindex="0"
+    role="application"
+    aria-label="ECS Batch City 3D visualization。左右矢印キーで地区を選択、Escapeで解除"
     @click="onClick"
     @pointermove="onPointerMove"
+    @keydown="onKeydown"
   />
 </template>
