@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CityCanvas from './components/CityCanvas.vue'
+import { narrationFor } from './narration'
 import { scenarioLabel } from './sim/model'
+import { DISTRICT_LABELS } from './three/create-world-renderer'
+import { flowForPhase } from './three/flows'
 import type { ExecutorType, FailoverPolicy, Scenario, TimelineEvent } from './sim/types'
 import { useSimulationStore } from './stores/simulation'
 
@@ -52,8 +55,27 @@ function onDistrictSelect(district: string | null): void {
 
 function resetView(): void {
   selectedDistrict.value = null
-  cityCanvas.value?.resetView()
+  cityCanvas.value?.resetView?.()
 }
+
+// 紙芝居: phaseの説明カードと、当該地区へのカメラカット。
+const narration = computed(() => narrationFor(state.value))
+const followCamera = ref(true)
+const narrationTone: Record<string, string> = {
+  info: 'border-sky-500/50',
+  success: 'border-emerald-500/60',
+  warning: 'border-amber-500/60',
+  error: 'border-red-500/60',
+}
+watch(() => state.value.phase, (phase) => {
+  if (!followCamera.value || phase === 'IDLE') return
+  if (phase === 'DONE') {
+    cityCanvas.value?.resetView?.()
+    return
+  }
+  const flow = flowForPhase(phase, state.value.executorType)
+  if (flow) cityCanvas.value?.focusDistrict?.(DISTRICT_LABELS[flow.to])
+})
 const resultTone = computed(() => ({
   NORMAL: 'text-emerald-300 border-emerald-400/40 bg-emerald-400/10',
   WARNING: 'text-amber-300 border-amber-400/40 bg-amber-400/10',
@@ -280,6 +302,19 @@ onBeforeUnmount(() => window.clearInterval(timer))
         <p class="mt-1.5 leading-5 text-slate-300">{{ districtInfo[selectedDistrict] }}</p>
       </div>
       <p v-else class="pointer-events-none absolute left-1/2 top-20 z-10 -translate-x-1/2 rounded bg-slate-950/60 px-3 py-1 text-[11px] text-slate-300">ドラッグで回転 · ホイールでズーム · 建物クリックで説明と視点</p>
+
+      <transition name="fade" mode="out-in">
+        <div v-if="narration" :key="narration.title" class="absolute bottom-28 left-1/2 z-10 w-[min(92vw,620px)] -translate-x-1/2 rounded-2xl border-2 bg-slate-950/85 p-4 backdrop-blur" :class="narrationTone[narration.tone]">
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-base font-bold text-white">{{ narration.title }}</p>
+            <label class="flex shrink-0 items-center gap-1.5 text-[10px] text-slate-400">
+              カメラ追従
+              <input v-model="followCamera" type="checkbox" class="size-3.5 accent-sky-400" />
+            </label>
+          </div>
+          <p class="mt-1.5 text-sm leading-6 text-slate-200">{{ narration.body }}</p>
+        </div>
+      </transition>
 
       <section>
         <div>

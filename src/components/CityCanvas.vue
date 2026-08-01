@@ -63,7 +63,11 @@ function resetView(): void {
   world?.focusDistrict(null)
 }
 
-defineExpose({ resetView })
+function focusDistrict(district: string | null): void {
+  world?.focusDistrict(district)
+}
+
+defineExpose({ resetView, focusDistrict })
 
 onMounted(() => {
   if (!canvas.value) return
