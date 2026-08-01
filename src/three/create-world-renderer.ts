@@ -39,8 +39,23 @@ const statusColor = (state: SimulationState): number => {
   return 0x38bdf8
 }
 
-const DEFAULT_CAMERA_POSITION = new THREE.Vector3(14, 14, 30)
-const DEFAULT_CAMERA_TARGET = new THREE.Vector3(0, 1.5, 0)
+const DEFAULT_CAMERA_TARGET = new THREE.Vector3(0, 2.2, 0)
+const CITY_HALF_WIDTH = 13.2
+const CAMERA_FOV_DEG = 42
+
+// aspect比が狭いほどカメラを引いて、街全体(±CITY_HALF_WIDTH)が必ず
+// 画面に収まる距離を返す。上限は設けない(狭いモバイル縦画面でも収める)。
+function defaultCameraPositionForAspect(aspect: number): THREE.Vector3 {
+  const halfFovTan = Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV_DEG / 2)) * Math.max(aspect, 0.3)
+  const distance = Math.max(26, CITY_HALF_WIDTH / halfFovTan)
+  return new THREE.Vector3(0, 14, distance + 2)
+}
+
+// カメラが遠いほどfogを薄くして、街の見え方(減衰量)を距離に依らず
+// ほぼ一定に保つ。
+function fogDensityForDistance(distance: number): number {
+  return 0.88 / Math.max(distance, 26)
+}
 
 function createLabelSprite(text: string): THREE.Sprite {
   const canvas = document.createElement('canvas')
@@ -151,10 +166,14 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
   const scene = new THREE.Scene()
-  scene.fog = new THREE.FogExp2(0x07111f, 0.022)
-  const camera = new THREE.PerspectiveCamera(42, canvas.clientWidth / Math.max(canvas.clientHeight, 1), 0.1, 200)
-  camera.position.copy(DEFAULT_CAMERA_POSITION)
-  const cameraGoal = DEFAULT_CAMERA_POSITION.clone()
+  const fog = new THREE.FogExp2(0x07111f, 0.022)
+  scene.fog = fog
+  const camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEG, canvas.clientWidth / Math.max(canvas.clientHeight, 1), 0.1, 200)
+  let focusedDistrict: string | null = null
+  const defaultPosition = defaultCameraPositionForAspect(camera.aspect)
+  fog.density = fogDensityForDistance(defaultPosition.z)
+  camera.position.copy(defaultPosition)
+  const cameraGoal = defaultPosition.clone()
   const targetGoal = DEFAULT_CAMERA_TARGET.clone()
   const currentTarget = DEFAULT_CAMERA_TARGET.clone()
   camera.lookAt(currentTarget)
@@ -206,6 +225,9 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
     renderer.setSize(width, height, false)
     camera.aspect = width / Math.max(height, 1)
     camera.updateProjectionMatrix()
+    defaultPosition.copy(defaultCameraPositionForAspect(camera.aspect))
+    fog.density = fogDensityForDistance(defaultPosition.z)
+    if (!focusedDistrict) cameraGoal.copy(defaultPosition)
   }
 
   const render = (): void => {
@@ -222,14 +244,16 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
     if (latest) {
       const color = statusColor(latest)
       flowMaterial.color.setHex(color)
-      const activeIndex = Math.min(districts.length - 1, Math.max(0,
-        latest.phase === 'PROVISION_ENI' || latest.phase === 'WAIT_CAPACITY' || latest.phase === 'PULL_IMAGE' ? 0
-          : latest.phase === 'START_JVM' ? 1
-            : latest.phase === 'START_SPRING' || latest.phase === 'START_JOB' ? 2
-              : latest.phase === 'RUN_TASKLET' || latest.phase === 'FLUSH_BATCH' ? 3
-                : latest.phase === 'COMMIT' || latest.phase === 'ROLLBACK' ? 5
-                  : 4,
-      ))
+      // IDLE / DONEでは処理中の地区が存在しないためハイライトしない。
+      const activeIndex = latest.phase === 'IDLE' || latest.phase === 'DONE' ? -1
+        : Math.min(districts.length - 1, Math.max(0,
+          latest.phase === 'PROVISION_ENI' || latest.phase === 'WAIT_CAPACITY' || latest.phase === 'PULL_IMAGE' ? 0
+            : latest.phase === 'START_JVM' ? 1
+              : latest.phase === 'START_SPRING' || latest.phase === 'START_JOB' ? 2
+                : latest.phase === 'RUN_TASKLET' || latest.phase === 'FLUSH_BATCH' ? 3
+                  : latest.phase === 'COMMIT' || latest.phase === 'ROLLBACK' ? 5
+                    : 4,
+        ))
       districts.forEach((district, index) => {
         const isActive = index === activeIndex
         const isSelected = district.label === selected
@@ -266,10 +290,12 @@ export function createWorldRenderer(canvas: HTMLCanvasElement, options: WorldRen
     focusDistrict(district) {
       const found = districts.find((candidate) => candidate.label === district)
       if (found) {
+        focusedDistrict = found.label
         cameraGoal.set(found.center.x + 4.5, found.topY + 4.5, found.center.z + 9)
         targetGoal.copy(found.center)
       } else {
-        cameraGoal.copy(DEFAULT_CAMERA_POSITION)
+        focusedDistrict = null
+        cameraGoal.copy(defaultPosition)
         targetGoal.copy(DEFAULT_CAMERA_TARGET)
       }
     },

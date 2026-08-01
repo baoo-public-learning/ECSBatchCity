@@ -115,7 +115,8 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 - (解消済み 2026-08-01)RUNNING前のStopTask+hangのSIGTERM違和感は、起動前StopTaskを「SIGTERMなしの起動中止」として修正した。
 - 同日、Java 21設定も公開ページで確認: 設定パネル(CPU選択でメモリ選択肢がFargate有効組み合わせに絞られる)、JVM認識CPU 1(固定)表示、1 vCPUでGC=Serial、native予算とJAVA_TOOL_OPTIONS表示、256 CPU/512 MiB/MaxRAM 25%でのメモリ起因OOM(需要136 > 128 MiB→exit 3→回避ヒント→STARTED残留)。
 - 同日、3D内Spriteラベルの表示も公開ページで確認(DOMチップ撤去済み)。AURORAラベルの見切れは建築化コミットのカメラ調整で解消(全地区pickableのテストで保証)。
-- 建築化+picking+camera focus(commit f904365)はデプロイ成功・全76テストパス済みだが、**公開ページの目視確認は未実施**。QA中にChrome拡張のscreenshot APIとJS実行が故障(renderer frozen)したため。次のセッションの最初に必ず目視すること: 6建物の見た目、クリック選択→説明パネル→camera寄り、視点リセット、hoverカーソル、タッチスクロールで選択されないこと。
+- 建築化以降の見た目は、Chrome拡張が故障したため**headless Chrome(SwiftShader)のスクリーンショット**で確認した(2026-08-01)。この方法で2件の不具合を発見・修正済み: (1) IDLE時にfallbackでJDBCがハイライトされる (2) 中央canvasの狭いaspect比でECS/AURORAが見切れる→**aspectに応じてカメラ距離を動的計算する正面ビュー**へ変更し、全6建物+ラベルの収まりをスクリーンショットで確認済み。クリック選択・視点リセット・hoverなどの操作系は単体テストでのみ検証(実クリックの目視は未実施)。
+- 目視QAの代替手段としてheadless Chromeが有効: `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --use-angle=swiftshader --enable-unsafe-swiftshader --screenshot=out.png --window-size=1440,900 --virtual-time-budget=15000 <URL>`(`--disable-gpu`だとWebGLが黒くなるので不可)。
 - 未実施: mobile幅QA(Chromeウィンドウのresizeが常に無効、DevTools device emulationも拡張にブロックされたため。実機または別環境で確認すること)。
 - 補足: バックグラウンドタブではChromeのtimer throttlingとdelta cap(0.25s)によりシミュレーション進行が実時間より遅くなる。バグではない。
 
@@ -257,6 +258,7 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 - manualChunksでthree(522kB)/vue+pinia(70kB)/app(39kB)に分割し、500kB warningはthree本体のみとなったため`chunkSizeWarningLimit: 560`で明示済み扱いにした。さらに縮めるならThree.jsのlazy load。
 - Open Graph metadata(og:title/description/type/url、twitter:card)を`index.html`へ追加。
+- og:image(1200×630)をheadless Chromeで生成し`public/og-image.png`へ配置、`summary_large_image`化(2026-08-01)。元HTMLはセッションのscratchpadで作成したもので、作り直す場合はHTMLポスター→headless Chromeスクリーンショットの手順で再生成できる。
 
 残り:
 
