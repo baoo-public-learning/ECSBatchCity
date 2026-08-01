@@ -304,6 +304,19 @@ GitHub Pagesのbuildとdeployは成功済み。公開HTML、JavaScript、CSSがH
 
 検証はheadless Chrome(SwiftShader)スクリーンショットの反復で行う。PGSimCityのsourceはセッションのscratchpad(pgsimcity-src)にclone済み(参考: src/world/レイアウト、src/engine/flows.ts、src/ui/hud.ts)。
 
+### v2第1弾 実装済み(2026-08-01)
+
+上記1〜6を最初の粒度で実装しデプロイ済み。`?autorun=1`で読み込み直後にRunTaskが走る(デモ/スクリーンショット用)。実行中スクリーンショットでCONTAINER/SPRINGの発光と粒子ストリームの動作を確認済み。**このcommitのcodex reviewは未実施**(次セッション冒頭で`codex review`を回すこと)。
+
+### v2次スライス候補
+
+- 建物の窓明かり(active時に点滅するemissive窓)、建物のバリエーション増
+- flush/commit/rollbackのイベントバースト演出(タイミング駆動の粒子束)
+- 地区クリック時のfocusとOrbitControlsの併存改善(現在focusはカメラ瞬間移動)
+- HUDパネルの折りたたみ(モバイルでは3Dを覆ってしまうため必須)
+- 空(雲・太陽)、プレート縁の造形、水面などPGSimCity的な環境要素
+- Timeline/BatchResultをHUD下部のドロワーへ移すなど情報設計の再検討
+
 ## 次の推奨タスク
 
 最初のタスクは「mobile幅の目視QA」にする(この環境ではChromeウィンドウのresizeとDevTools device emulationが拡張の制約で利用できなかったため未実施。実機または別環境で確認すること)。その後はP1「終了と障害」(Aurora接続失敗、writer failover、OOM系)またはP1「Java 21設定」へ進む。
